@@ -41,8 +41,9 @@ class CRF(nn.Module):
         init_transitions[STOP_TAG,:] = -10000.0
         init_transitions[:,0] = -10000.0
         init_transitions[0,:] = -10000.0
-        if self.gpu:
-            init_transitions = init_transitions.cuda()
+        # if self.gpu:
+        if self.gpu >= 0 and torch.cuda.is_available():
+            init_transitions = init_transitions.cuda(self.gpu)
         self.transitions = nn.Parameter(init_transitions)
 
         # self.transitions = nn.Parameter(torch.Tensor(self.tagset_size+2, self.tagset_size+2))
@@ -168,8 +169,8 @@ class CRF(nn.Module):
         last_values = last_partition.expand(batch_size, tag_size, tag_size) + self.transitions.view(1,tag_size, tag_size).expand(batch_size, tag_size, tag_size)
         _, last_bp = torch.max(last_values, 1)
         pad_zero = autograd.Variable(torch.zeros(batch_size, tag_size)).long()
-        if self.gpu:
-            pad_zero = pad_zero.cuda()
+        if self.gpu >= 0 and torch.cuda.is_available():
+            pad_zero = pad_zero.cuda(self.gpu)
         back_points.append(pad_zero)
         back_points  =  torch.cat(back_points).view(seq_len, batch_size, tag_size)
 
@@ -186,8 +187,8 @@ class CRF(nn.Module):
         back_points = back_points.transpose(1,0).contiguous()
         ## decode from the end, padded position ids are 0, which will be filtered if following evaluation
         decode_idx = autograd.Variable(torch.LongTensor(seq_len, batch_size))
-        if self.gpu:
-            decode_idx = decode_idx.cuda()
+        if self.gpu >= 0 and torch.cuda.is_available():
+            decode_idx = decode_idx.cuda(self.gpu)
         decode_idx[-1] = pointer.detach()
         for idx in range(len(back_points)-2, -1, -1):
             pointer = torch.gather(back_points[idx], 1, pointer.contiguous().view(batch_size, 1))
@@ -218,8 +219,8 @@ class CRF(nn.Module):
         tag_size = scores.size(2)
         ## convert tag value into a new format, recorded label bigram information to index
         new_tags = autograd.Variable(torch.LongTensor(batch_size, seq_len))
-        if self.gpu:
-            new_tags = new_tags.cuda()
+        if self.gpu >= 0 and torch.cuda.is_available():
+            new_tags = new_tags.cuda(self.gpu)
         for idx in range(seq_len):
             if idx == 0:
                 ## start -> first score
@@ -349,8 +350,8 @@ class CRF(nn.Module):
         end_bp = end_bp.transpose(2,1)
         # end_bp: (batch, tag_size, nbest)
         pad_zero = autograd.Variable(torch.zeros(batch_size, tag_size, nbest)).long()
-        if self.gpu:
-            pad_zero = pad_zero.cuda()
+        if self.gpu >= 0 and torch.cuda.is_available():
+            pad_zero = pad_zero.cuda(self.gpu)
         back_points.append(pad_zero)
         back_points = torch.cat(back_points).view(seq_len, batch_size, tag_size, nbest)
 
@@ -382,8 +383,8 @@ class CRF(nn.Module):
         ## back_points: (seq_len, batch, tag_size, nbest)
         ## decode from the end, padded position ids are 0, which will be filtered in following evaluation
         decode_idx = autograd.Variable(torch.LongTensor(seq_len, batch_size, nbest))
-        if self.gpu:
-            decode_idx = decode_idx.cuda()
+        if self.gpu >= 0 and torch.cuda.is_available():
+            decode_idx = decode_idx.cuda(self.gpu)
         decode_idx[-1] = pointer.data/nbest
         # print "pointer-1:",pointer[2]
         # exit(0)

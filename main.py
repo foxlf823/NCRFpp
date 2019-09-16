@@ -258,16 +258,16 @@ def batchify_sequence_labeling_with_label(input_batch_list, gpu, if_train=True):
     char_seq_tensor = char_seq_tensor[char_perm_idx]
     _, char_seq_recover = char_perm_idx.sort(0, descending=False)
     _, word_seq_recover = word_perm_idx.sort(0, descending=False)
-    if gpu:
-        word_seq_tensor = word_seq_tensor.cuda()
+    if gpu >= 0 and torch.cuda.is_available():
+        word_seq_tensor = word_seq_tensor.cuda(gpu)
         for idx in range(feature_num):
-            feature_seq_tensors[idx] = feature_seq_tensors[idx].cuda()
-        word_seq_lengths = word_seq_lengths.cuda()
-        word_seq_recover = word_seq_recover.cuda()
-        label_seq_tensor = label_seq_tensor.cuda()
-        char_seq_tensor = char_seq_tensor.cuda()
-        char_seq_recover = char_seq_recover.cuda()
-        mask = mask.cuda()
+            feature_seq_tensors[idx] = feature_seq_tensors[idx].cuda(gpu)
+        word_seq_lengths = word_seq_lengths.cuda(gpu)
+        word_seq_recover = word_seq_recover.cuda(gpu)
+        label_seq_tensor = label_seq_tensor.cuda(gpu)
+        char_seq_tensor = char_seq_tensor.cuda(gpu)
+        char_seq_recover = char_seq_recover.cuda(gpu)
+        mask = mask.cuda(gpu)
     return word_seq_tensor,feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, label_seq_tensor, mask
 
 
@@ -376,6 +376,8 @@ def train(data):
         print("Optimizer illegal: %s"%(data.optimizer))
         exit(1)
     best_dev = -10
+    best_test = -10
+    bad_counter = 0
     # data.HP_iteration = 1
     ## start training
     for idx in range(data.HP_iteration):
@@ -454,22 +456,44 @@ def train(data):
 
         if current_score > best_dev:
             if data.seg:
-                print("Exceed previous best f score:", best_dev)
+                print("Exceed previous best dev f score:", best_dev)
             else:
-                print("Exceed previous best acc score:", best_dev)
-            model_name = data.model_dir +'.'+ str(idx) + ".model"
-            print("Save current best model in file:", model_name)
+                print("Exceed previous best dev acc score:", best_dev)
+            # model_name = data.model_dir +'.'+ str(idx) + ".model"
+            model_name = data.model_dir + ".dev.model"
+            # print("Save current best model in file:", model_name)
             torch.save(model.state_dict(), model_name)
             best_dev = current_score
+
+            bad_counter = 0
+        else:
+            bad_counter += 1
         # ## decode test
         speed, acc, p, r, f, _,_ = evaluate(data, model, "test")
         test_finish = time.time()
         test_cost = test_finish - dev_finish
         if data.seg:
+            current_score = f
             print("Test: time: %.2fs, speed: %.2fst/s; acc: %.4f, p: %.4f, r: %.4f, f: %.4f"%(test_cost, speed, acc, p, r, f))
         else:
+            current_score = acc
             print("Test: time: %.2fs, speed: %.2fst/s; acc: %.4f"%(test_cost, speed, acc))
+
+        if current_score > best_test:
+            if data.seg:
+                print("Exceed previous best test f score:", best_test)
+            else:
+                print("Exceed previous best test acc score:", best_test)
+
+            model_name = data.model_dir + ".test.model"
+            torch.save(model.state_dict(), model_name)
+            best_test = current_score
+
         gc.collect()
+
+        if bad_counter >= data.patience:
+            print('Early Stop!')
+            break
 
 
 def load_model_decode(data, name):
@@ -518,11 +542,11 @@ if __name__ == '__main__':
     parser.add_argument('--seg', default="True") 
     parser.add_argument('--raw') 
     parser.add_argument('--loadmodel')
-    parser.add_argument('--output') 
+    parser.add_argument('--output')
 
     args = parser.parse_args()
     data = Data()
-    data.HP_gpu = torch.cuda.is_available()
+    # data.HP_gpu = torch.cuda.is_available()
     if args.config == 'None':
         data.train_dir = args.train 
         data.dev_dir = args.dev 

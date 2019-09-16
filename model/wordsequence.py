@@ -60,17 +60,17 @@ class WordSequence(nn.Module):
         # The linear layer that maps from hidden state space to tag space
         self.hidden2tag = nn.Linear(data.HP_hidden_dim, data.label_alphabet_size)
 
-        if self.gpu:
-            self.droplstm = self.droplstm.cuda()
-            self.hidden2tag = self.hidden2tag.cuda()
+        if self.gpu >= 0 and torch.cuda.is_available():
+            self.droplstm = self.droplstm.cuda(self.gpu)
+            self.hidden2tag = self.hidden2tag.cuda(self.gpu)
             if self.word_feature_extractor == "CNN":
-                self.word2cnn = self.word2cnn.cuda()
+                self.word2cnn = self.word2cnn.cuda(self.gpu)
                 for idx in range(self.cnn_layer):
-                    self.cnn_list[idx] = self.cnn_list[idx].cuda()
-                    self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda()
-                    self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[idx].cuda()
+                    self.cnn_list[idx] = self.cnn_list[idx].cuda(self.gpu)
+                    self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda(self.gpu)
+                    self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[idx].cuda(self.gpu)
             else:
-                self.lstm = self.lstm.cuda()
+                self.lstm = self.lstm.cuda(self.gpu)
 
 
     def forward(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover):

@@ -42,6 +42,7 @@ class Data:
         self.seg = True
 
         ### I/O
+        self.dataset = None
         self.train_dir = None
         self.dev_dir = None
         self.test_dir = None
@@ -91,6 +92,7 @@ class Data:
         self.average_batch_loss = False
         self.optimizer = "SGD" ## "SGD"/"AdaGrad"/"AdaDelta"/"RMSProp"/"Adam"
         self.status = "train"
+        self.patience=10
         ### Hyperparameters
         self.HP_cnn_layer = 4
         self.HP_iteration = 100
@@ -101,7 +103,7 @@ class Data:
         self.HP_lstm_layer = 1
         self.HP_bilstm = True
 
-        self.HP_gpu = False
+        self.HP_gpu = -1
         self.HP_lr = 0.015
         self.HP_lr_decay = 0.05
         self.HP_clip = None
@@ -131,6 +133,7 @@ class Data:
         print("     Char embedding size: %s"%(self.char_emb_dim))
         print("     Norm   word     emb: %s"%(self.norm_word_emb))
         print("     Norm   char     emb: %s"%(self.norm_char_emb))
+        print("     Dataset: %s"%(self.dataset))
         print("     Train  file directory: %s"%(self.train_dir))
         print("     Dev    file directory: %s"%(self.dev_dir))
         print("     Test   file directory: %s"%(self.test_dir))
@@ -163,6 +166,7 @@ class Data:
         print("     Iteration: %s"%(self.HP_iteration))
         print("     BatchSize: %s"%(self.HP_batch_size))
         print("     Average  batch   loss: %s"%(self.average_batch_loss))
+        print("     Patience: %s"%(self.patience))
 
         print(" "+"++"*20)
         print(" Hyperparameters:")
@@ -393,6 +397,10 @@ class Data:
     def read_config(self,config_file):
         config = config_file_to_dict(config_file)
         ## read data:
+        the_item = 'dataset'
+        if the_item in config:
+            self.dataset = config[the_item]
+
         the_item = 'train_dir'
         if the_item in config:
             self.train_dir = config[the_item]
@@ -488,6 +496,9 @@ class Data:
         the_item = 'status'
         if the_item in config:
             self.status = config[the_item]
+        the_item = 'patience'
+        if the_item in config:
+            self.patience = int(config[the_item])
 
         ## read Hyperparameters:
         the_item = 'cnn_layer'
@@ -518,7 +529,7 @@ class Data:
 
         the_item = 'gpu'
         if the_item in config:
-            self.HP_gpu = str2bool(config[the_item])
+            self.HP_gpu = int(config[the_item])
         the_item = 'learning_rate'
         if the_item in config:
             self.HP_lr = float(config[the_item])

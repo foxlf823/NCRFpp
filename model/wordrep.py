@@ -57,11 +57,11 @@ class WordRep(nn.Module):
             else:
                 self.feature_embeddings[idx].weight.data.copy_(torch.from_numpy(self.random_embedding(data.feature_alphabets[idx].size(), self.feature_embedding_dims[idx])))
 
-        if self.gpu:
-            self.drop = self.drop.cuda()
-            self.word_embedding = self.word_embedding.cuda()
+        if self.gpu >= 0 and torch.cuda.is_available():
+            self.drop = self.drop.cuda(self.gpu)
+            self.word_embedding = self.word_embedding.cuda(self.gpu)
             for idx in range(self.feature_num):
-                self.feature_embeddings[idx] = self.feature_embeddings[idx].cuda()
+                self.feature_embeddings[idx] = self.feature_embeddings[idx].cuda(self.gpu)
 
 
 

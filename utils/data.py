@@ -110,6 +110,11 @@ class Data:
         self.HP_momentum = 0
         self.HP_l2 = 1e-8
 
+        self.elmo_options_file = ''
+        self.elmo_weight_file = ''
+        self.elmo_tune = False
+        self.elmo_dropout = 0.0
+
     def show_data_summary(self):
         
         print("++"*50)
@@ -181,6 +186,14 @@ class Data:
         print("     Hyper      lstm_layer: %s"%(self.HP_lstm_layer))
         print("     Hyper          bilstm: %s"%(self.HP_bilstm))
         print("     Hyper             GPU: %s"%(self.HP_gpu))
+
+        print(" " + "++" * 20)
+        print(" ELMo:")
+        print("     elmo_options_file: %s" % (self.elmo_options_file))
+        print("     elmo_weight_file: %s" % (self.elmo_weight_file))
+        print("     elmo_tune: %s" % (self.elmo_tune))
+        print("     elmo_dropout: %s" % (self.elmo_dropout))
+
         print("DATA SUMMARY END.")
         print("++"*50)
         sys.stdout.flush()
@@ -549,6 +562,21 @@ class Data:
         if self.sentence_classification:
             self.seg = False
             self.use_crf = False
+
+        ## ELMo
+        the_item = 'elmo_options_file'
+        if the_item in config:
+            self.elmo_options_file = config[the_item]
+        the_item = 'elmo_weight_file'
+        if the_item in config:
+            self.elmo_weight_file = config[the_item]
+        the_item = 'elmo_tune'
+        if the_item in config:
+            self.elmo_tune = str2bool(config[the_item])
+        the_item = 'elmo_dropout'
+        if the_item in config:
+            self.elmo_dropout = float(config[the_item])
+
 
 
 def config_file_to_dict(input_file):

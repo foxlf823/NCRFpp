@@ -135,12 +135,16 @@ def lr_decay(optimizer, epoch, decay_rate, init_lr):
 def evaluate(data, model, name, nbest=None):
     if name == "train":
         instances = data.train_Ids
+        instances_text = data.train_texts
     elif name == "dev":
         instances = data.dev_Ids
+        instances_text = data.dev_texts
     elif name == 'test':
         instances = data.test_Ids
+        instances_text = data.test_texts
     elif name == 'raw':
         instances = data.raw_Ids
+        instances_text = data.raw_texts
     else:
         print("Error: wrong evaluate name,", name)
         exit(1)
@@ -162,18 +166,19 @@ def evaluate(data, model, name, nbest=None):
         if end > train_num:
             end =  train_num
         instance = instances[start:end]
+        instance_text = instances_text[start:end]
         if not instance:
             continue
-        batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label, mask  = batchify_with_label(instance, data.HP_gpu, False, data.sentence_classification)
+        batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label, mask, batch_elmo_char = batchify_with_label(instance, instance_text, data.HP_gpu, False, data.sentence_classification)
         if nbest and not data.sentence_classification:
-            scores, nbest_tag_seq = model.decode_nbest(batch_word,batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, mask, nbest)
+            scores, nbest_tag_seq = model.decode_nbest(batch_word,batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, mask, nbest, batch_elmo_char)
             nbest_pred_result = recover_nbest_label(nbest_tag_seq, mask, data.label_alphabet, batch_wordrecover)
             nbest_pred_results += nbest_pred_result
             pred_scores += scores[batch_wordrecover].cpu().data.numpy().tolist()
             ## select the best sequence to evalurate
             tag_seq = nbest_tag_seq[:,:,0]
         else:
-            tag_seq = model(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, mask)
+            tag_seq = model(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, mask, batch_elmo_char)
         # print("tag:",tag_seq)
         pred_label, gold_label = recover_label(tag_seq, batch_label, mask, data.label_alphabet, batch_wordrecover, data.sentence_classification)
         pred_results += pred_label
@@ -186,14 +191,16 @@ def evaluate(data, model, name, nbest=None):
     return speed, acc, p, r, f, pred_results, pred_scores
 
 
-def batchify_with_label(input_batch_list, gpu, if_train=True, sentence_classification=False):
+def batchify_with_label(input_batch_list, input_text_batch_list, gpu, if_train=True, sentence_classification=False):
     if sentence_classification:
-        return batchify_sentence_classification_with_label(input_batch_list, gpu, if_train)
+        # return batchify_sentence_classification_with_label(input_batch_list, gpu, if_train)
+        raise RuntimeError("not support")
     else:
-        return batchify_sequence_labeling_with_label(input_batch_list, gpu, if_train)
+        return batchify_sequence_labeling_with_label(input_batch_list, input_text_batch_list, gpu, if_train)
 
+from elmo.elmo import batch_to_ids
 
-def batchify_sequence_labeling_with_label(input_batch_list, gpu, if_train=True):
+def batchify_sequence_labeling_with_label(input_batch_list, input_text_batch_list, gpu, if_train=True):
     """
         input: list of words, chars and labels, various length. [[words, features, chars, labels],[words, features, chars,labels],...]
             words: word ids for one sentence. (batch_size, sent_len)
@@ -218,6 +225,10 @@ def batchify_sequence_labeling_with_label(input_batch_list, gpu, if_train=True):
     feature_num = len(features[0][0])
     chars = [sent[2] for sent in input_batch_list]
     labels = [sent[3] for sent in input_batch_list]
+
+    words_text = [sent[0] for sent in input_text_batch_list]
+    elmo_char_seq_tensor = batch_to_ids(words_text)
+
     word_seq_lengths = torch.LongTensor(list(map(len, words)))
     max_seq_len = word_seq_lengths.max().item()
     word_seq_tensor = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).long()
@@ -240,6 +251,7 @@ def batchify_sequence_labeling_with_label(input_batch_list, gpu, if_train=True):
 
     label_seq_tensor = label_seq_tensor[word_perm_idx]
     mask = mask[word_perm_idx]
+    elmo_char_seq_tensor = elmo_char_seq_tensor[word_perm_idx]
     ### deal with char
     # pad_chars (batch_size, max_seq_len)
     pad_chars = [chars[idx] + [[0]] * (max_seq_len-len(chars[idx])) for idx in range(len(chars))]
@@ -268,7 +280,8 @@ def batchify_sequence_labeling_with_label(input_batch_list, gpu, if_train=True):
         char_seq_tensor = char_seq_tensor.cuda(gpu)
         char_seq_recover = char_seq_recover.cuda(gpu)
         mask = mask.cuda(gpu)
-    return word_seq_tensor,feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, label_seq_tensor, mask
+        elmo_char_seq_tensor = elmo_char_seq_tensor.cuda(gpu)
+    return word_seq_tensor,feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, label_seq_tensor, mask, elmo_char_seq_tensor
 
 
 def batchify_sentence_classification_with_label(input_batch_list, gpu, if_train=True):
@@ -392,7 +405,9 @@ def train(data):
         total_loss = 0
         right_token = 0
         whole_token = 0
-        random.shuffle(data.train_Ids)
+        cc = list(zip(data.train_Ids, data.train_texts))
+        random.shuffle(cc)
+        data.train_Ids[:], data.train_texts[:] = zip(*cc)
         print("Shuffle: first input word list:", data.train_Ids[0][0])
         ## set model in train model
         model.train()
@@ -407,11 +422,12 @@ def train(data):
             if end >train_num:
                 end = train_num
             instance = data.train_Ids[start:end]
+            instance_text = data.train_texts[start:end]
             if not instance:
                 continue
-            batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label, mask  = batchify_with_label(instance, data.HP_gpu, True, data.sentence_classification)
+            batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label, mask, batch_elmo_char = batchify_with_label(instance, instance_text, data.HP_gpu, True, data.sentence_classification)
             instance_count += 1
-            loss, tag_seq = model.calculate_loss(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, batch_label, mask)
+            loss, tag_seq = model.calculate_loss(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, batch_label, mask, batch_elmo_char)
             right, whole = predict_check(tag_seq, batch_label, mask, data.sentence_classification)
             right_token += right
             whole_token += whole

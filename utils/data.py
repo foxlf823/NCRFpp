@@ -114,6 +114,7 @@ class Data:
         self.elmo_weight_file = ''
         self.elmo_tune = False
         self.elmo_dropout = 0.0
+        self.use_elmo = False
 
     def show_data_summary(self):
         
@@ -193,6 +194,7 @@ class Data:
         print("     elmo_weight_file: %s" % (self.elmo_weight_file))
         print("     elmo_tune: %s" % (self.elmo_tune))
         print("     elmo_dropout: %s" % (self.elmo_dropout))
+        print("     use_elmo: %s" % (self.use_elmo))
 
         print("DATA SUMMARY END.")
         print("++"*50)
@@ -576,6 +578,9 @@ class Data:
         the_item = 'elmo_dropout'
         if the_item in config:
             self.elmo_dropout = float(config[the_item])
+        the_item = 'use_elmo'
+        if the_item in config:
+            self.use_elmo = str2bool(config[the_item])
 
 
 

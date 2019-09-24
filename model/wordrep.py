@@ -11,6 +11,8 @@ import numpy as np
 from .charbilstm import CharBiLSTM
 from .charbigru import CharBiGRU
 from .charcnn import CharCNN
+import json
+from elmo.elmo import Elmo
 
 class WordRep(nn.Module):
     def __init__(self, data):
@@ -57,11 +59,21 @@ class WordRep(nn.Module):
             else:
                 self.feature_embeddings[idx].weight.data.copy_(torch.from_numpy(self.random_embedding(data.feature_alphabets[idx].size(), self.feature_embedding_dims[idx])))
 
+        self.use_elmo = data.use_elmo
+        if self.use_elmo:
+            self.elmo = Elmo(data.elmo_options_file, data.elmo_weight_file, 1, requires_grad=data.elmo_tune,
+                                    dropout=data.elmo_dropout)
+
+            with open(data.elmo_options_file, 'r') as fin:
+                self._options = json.load(fin)
+
         if self.gpu >= 0 and torch.cuda.is_available():
             self.drop = self.drop.cuda(self.gpu)
             self.word_embedding = self.word_embedding.cuda(self.gpu)
             for idx in range(self.feature_num):
                 self.feature_embeddings[idx] = self.feature_embeddings[idx].cuda(self.gpu)
+            if self.use_elmo:
+                self.elmo = self.elmo.cuda(self.gpu)
 
 
 
@@ -73,7 +85,7 @@ class WordRep(nn.Module):
         return pretrain_emb
 
 
-    def forward(self, word_inputs,feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover):
+    def forward(self, word_inputs,feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs):
         """
             input:
                 word_inputs: (batch_size, sent_len)
@@ -109,7 +121,13 @@ class WordRep(nn.Module):
                 char_features_extra = char_features_extra[char_seq_recover]
                 char_features_extra = char_features_extra.view(batch_size,sent_len,-1)
                 ## concat word and char together
-                word_list.append(char_features_extra)    
+                word_list.append(char_features_extra)
+
+        if self.use_elmo:
+            elmo_outputs = self.elmo(elmo_char_inputs)
+            elmo_outputs = elmo_outputs['elmo_representations'][0]
+            word_list.append(elmo_outputs)
+
         word_embs = torch.cat(word_list, 2)
         # if a == 0:
         #     print("inputs", word_inputs)

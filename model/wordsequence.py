@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from .wordrep import WordRep
+import json
 
 class WordSequence(nn.Module):
     def __init__(self, data):
@@ -31,6 +32,11 @@ class WordSequence(nn.Module):
                 self.input_size += data.HP_char_hidden_dim
         for idx in range(self.feature_num):
             self.input_size += data.feature_emb_dims[idx]
+        self.use_elmo = data.use_elmo
+        if self.use_elmo:
+            with open(data.elmo_options_file, 'r') as fin:
+                self._options = json.load(fin)
+            self.input_size += self._options['lstm']['projection_dim']*2
         # The LSTM takes word embeddings as inputs, and outputs hidden states
         # with dimensionality hidden_dim.
         if self.bilstm_flag:
@@ -73,7 +79,7 @@ class WordSequence(nn.Module):
                 self.lstm = self.lstm.cuda(self.gpu)
 
 
-    def forward(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover):
+    def forward(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs):
         """
             input:
                 word_inputs: (batch_size, sent_len)
@@ -86,7 +92,7 @@ class WordSequence(nn.Module):
                 Variable(batch_size, sent_len, hidden_dim)
         """
         
-        word_represent = self.wordrep(word_inputs,feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover)
+        word_represent = self.wordrep(word_inputs,feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs)
         ## word_embs (batch_size, seq_len, embed_size)
         if self.word_feature_extractor == "CNN":
             batch_size = word_inputs.size(0)

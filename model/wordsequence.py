@@ -48,7 +48,11 @@ class WordSequence(nn.Module):
         if self.word_feature_extractor == "GRU":
             self.lstm = nn.GRU(self.input_size, lstm_hidden, num_layers=self.lstm_layer, batch_first=True, bidirectional=self.bilstm_flag)
         elif self.word_feature_extractor == "LSTM":
-            self.lstm = nn.LSTM(self.input_size, lstm_hidden, num_layers=self.lstm_layer, batch_first=True, bidirectional=self.bilstm_flag)
+            if self.use_elmo:
+                self.lstm1 = nn.LSTM(self.input_size, lstm_hidden, num_layers=1, batch_first=True, bidirectional=self.bilstm_flag)
+                self.lstm2 = nn.LSTM(lstm_hidden*2, lstm_hidden // 2, num_layers=1, batch_first=True, bidirectional=self.bilstm_flag)
+            else:
+                self.lstm = nn.LSTM(self.input_size, lstm_hidden, num_layers=self.lstm_layer, batch_first=True, bidirectional=self.bilstm_flag)
         elif self.word_feature_extractor == "CNN":
             # cnn_hidden = data.HP_hidden_dim
             self.word2cnn = nn.Linear(self.input_size, data.HP_hidden_dim)
@@ -64,7 +68,10 @@ class WordSequence(nn.Module):
                 self.cnn_drop_list.append(nn.Dropout(data.HP_dropout))
                 self.cnn_batchnorm_list.append(nn.BatchNorm1d(data.HP_hidden_dim))
         # The linear layer that maps from hidden state space to tag space
-        self.hidden2tag = nn.Linear(data.HP_hidden_dim, data.label_alphabet_size)
+        if self.use_elmo:
+            self.hidden2tag = nn.Linear(data.HP_hidden_dim // 2, data.label_alphabet_size)
+        else:
+            self.hidden2tag = nn.Linear(data.HP_hidden_dim, data.label_alphabet_size)
 
         if self.gpu >= 0 and torch.cuda.is_available():
             self.droplstm = self.droplstm.cuda(self.gpu)
@@ -76,7 +83,11 @@ class WordSequence(nn.Module):
                     self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda(self.gpu)
                     self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[idx].cuda(self.gpu)
             else:
-                self.lstm = self.lstm.cuda(self.gpu)
+                if self.use_elmo:
+                    self.lstm1 = self.lstm1.cuda(self.gpu)
+                    self.lstm2 = self.lstm2.cuda(self.gpu)
+                else:
+                    self.lstm = self.lstm.cuda(self.gpu)
 
 
     def forward(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs):
@@ -109,7 +120,11 @@ class WordSequence(nn.Module):
         else:
             packed_words = pack_padded_sequence(word_represent, word_seq_lengths.cpu().numpy(), True)
             hidden = None
-            lstm_out, hidden = self.lstm(packed_words, hidden)
+            if self.use_elmo:
+                lstm_out, hidden = self.lstm1(packed_words, None)
+                lstm_out, hidden = self.lstm2(lstm_out, None)
+            else:
+                lstm_out, hidden = self.lstm(packed_words, hidden)
             lstm_out, _ = pad_packed_sequence(lstm_out)
             ## lstm_out (seq_len, seq_len, hidden_size)
             feature_out = self.droplstm(lstm_out.transpose(1,0))

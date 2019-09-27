@@ -25,6 +25,7 @@ class Data:
         self.MAX_SENTENCE_LENGTH = 250
         self.MAX_WORD_LENGTH = -1
         self.number_normalized = True
+        self.lowercase_tokens = False
         self.norm_word_emb = False
         self.norm_char_emb = False
         self.word_alphabet = Alphabet('word')
@@ -115,6 +116,8 @@ class Data:
         self.elmo_tune = False
         self.elmo_dropout = 0.0
         self.use_elmo = False
+        self.elmo_gamma = 1.0
+
 
     def show_data_summary(self):
         
@@ -130,6 +133,7 @@ class Data:
         print("     MAX SENTENCE LENGTH: %s"%(self.MAX_SENTENCE_LENGTH))
         print("     MAX   WORD   LENGTH: %s"%(self.MAX_WORD_LENGTH))
         print("     Number   normalized: %s"%(self.number_normalized))
+        print("     lowercase_tokens: %s"%(self.lowercase_tokens))
         print("     Word  alphabet size: %s"%(self.word_alphabet_size))
         print("     Char  alphabet size: %s"%(self.char_alphabet_size))
         print("     Label alphabet size: %s"%(self.label_alphabet_size))
@@ -195,6 +199,7 @@ class Data:
         print("     elmo_tune: %s" % (self.elmo_tune))
         print("     elmo_dropout: %s" % (self.elmo_dropout))
         print("     use_elmo: %s" % (self.use_elmo))
+        print("     elmo_gamma: %s" % (self.elmo_gamma))
 
         print("DATA SUMMARY END.")
         print("++"*50)
@@ -262,6 +267,8 @@ class Data:
                         word = word.decode('utf-8')
                     if self.number_normalized:
                         word = normalize_word(word)
+                    if self.lowercase_tokens:
+                        word = word.lower()
                     label = pairs[-1]
                     self.label_alphabet.add(label)
                     self.word_alphabet.add(word)
@@ -316,13 +323,13 @@ class Data:
     def generate_instance(self, name):
         self.fix_alphabet()
         if name == "train":
-            self.train_texts, self.train_Ids = read_instance(self.train_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
+            self.train_texts, self.train_Ids = read_instance(self.train_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
         elif name == "dev":
-            self.dev_texts, self.dev_Ids = read_instance(self.dev_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
+            self.dev_texts, self.dev_Ids = read_instance(self.dev_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
         elif name == "test":
-            self.test_texts, self.test_Ids = read_instance(self.test_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
+            self.test_texts, self.test_Ids = read_instance(self.test_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
         elif name == "raw":
-            self.raw_texts, self.raw_Ids = read_instance(self.raw_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token)
+            self.raw_texts, self.raw_Ids = read_instance(self.raw_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
         else:
             print("Error: you can only generate train/dev/test instance! Illegal input:%s"%(name))
 
@@ -465,6 +472,9 @@ class Data:
         the_item = 'number_normalized'
         if the_item in config:
             self.number_normalized = str2bool(config[the_item])
+        the_item = 'lowercase_tokens'
+        if the_item in config:
+            self.lowercase_tokens = str2bool(config[the_item])
 
         the_item = 'sentence_classification'
         if the_item in config:
@@ -581,6 +591,9 @@ class Data:
         the_item = 'use_elmo'
         if the_item in config:
             self.use_elmo = str2bool(config[the_item])
+        the_item = 'elmo_gamma'
+        if the_item in config:
+            self.elmo_gamma = float(config[the_item])
 
 
 

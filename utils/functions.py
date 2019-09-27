@@ -18,12 +18,13 @@ def normalize_word(word):
     return new_word
 
 
-def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, label_alphabet, number_normalized, max_sent_length, sentence_classification=False, split_token='\t', char_padding_size=-1, char_padding_symbol = '</pad>'):
+def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, label_alphabet, number_normalized, max_sent_length, sentence_classification=False, split_token='\t', lowercase_tokens=False, char_padding_size=-1, char_padding_symbol = '</pad>'):
     feature_num = len(feature_alphabets)
     in_lines = open(input_file,'r', encoding="utf8").readlines()
     instence_texts = []
     instence_Ids = []
     words = []
+    words_processed = []
     features = []
     chars = []
     labels = []
@@ -103,6 +104,9 @@ def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, l
                 words.append(word)
                 if number_normalized:
                     word = normalize_word(word)
+                if lowercase_tokens:
+                    word = word.lower()
+                words_processed.append(word)
                 label = pairs[-1]
                 labels.append(label)
                 word_Ids.append(word_alphabet.get_index(word))
@@ -135,9 +139,10 @@ def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, l
                 char_Ids.append(char_Id)
             else:
                 if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)) :
-                    instence_texts.append([words, features, chars, labels])
+                    instence_texts.append([words, features, chars, labels, words_processed])
                     instence_Ids.append([word_Ids, feature_Ids, char_Ids,label_Ids])
                 words = []
+                words_processed = []
                 features = []
                 chars = []
                 labels = []
@@ -146,9 +151,10 @@ def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, l
                 char_Ids = []
                 label_Ids = []
         if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)) :
-            instence_texts.append([words, features, chars, labels])
+            instence_texts.append([words, features, chars, labels, words_processed])
             instence_Ids.append([word_Ids, feature_Ids, char_Ids,label_Ids])
             words = []
+            words_processed = []
             features = []
             chars = []
             labels = []

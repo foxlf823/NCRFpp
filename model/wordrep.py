@@ -62,7 +62,7 @@ class WordRep(nn.Module):
         self.use_elmo = data.use_elmo
         if self.use_elmo:
             self.elmo = Elmo(data.elmo_options_file, data.elmo_weight_file, 1, requires_grad=data.elmo_tune,
-                                    dropout=data.elmo_dropout)
+                                    dropout=data.elmo_dropout, gamma=data.elmo_gamma)
 
             with open(data.elmo_options_file, 'r') as fin:
                 self._options = json.load(fin)

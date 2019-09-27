@@ -15,7 +15,7 @@ from overrides import overrides
 from allennlp.common import Params
 from .elmo_lstm import ElmoLstm
 from allennlp.modules.highway import Highway
-from allennlp.modules.scalar_mix import ScalarMix
+from .scalar_mix import ScalarMix
 from allennlp.nn.util import remove_sentence_boundaries, add_sentence_boundary_token_ids
 from allennlp.data.token_indexers.elmo_indexer import ELMoCharacterMapper, ELMoTokenCharactersIndexer
 from allennlp.data.dataset import Batch
@@ -88,7 +88,8 @@ class Elmo(torch.nn.Module):
                  vocab_to_cache: List[str] = None,
                  keep_sentence_boundaries: bool = False,
                  scalar_mix_parameters: List[float] = None,
-                 module: torch.nn.Module = None) -> None:
+                 module: torch.nn.Module = None,
+                 gamma: float = 1.0) -> None:
         super(Elmo, self).__init__()
 
         logger.info("Initializing ELMo")
@@ -111,7 +112,8 @@ class Elmo(torch.nn.Module):
                     self._elmo_lstm.num_layers,
                     do_layer_norm=do_layer_norm,
                     initial_scalar_parameters=scalar_mix_parameters,
-                    trainable=scalar_mix_parameters is None)
+                    trainable=scalar_mix_parameters is None,
+                    gamma=gamma)
             self.add_module('scalar_mix_{}'.format(k), scalar_mix)
             self._scalar_mixes.append(scalar_mix)
 

@@ -226,7 +226,7 @@ def batchify_sequence_labeling_with_label(input_batch_list, input_text_batch_lis
     chars = [sent[2] for sent in input_batch_list]
     labels = [sent[3] for sent in input_batch_list]
 
-    words_text = [sent[0] for sent in input_text_batch_list]
+    words_text = [sent[4] for sent in input_text_batch_list]
     elmo_char_seq_tensor = batch_to_ids(words_text)
 
     word_seq_lengths = torch.LongTensor(list(map(len, words)))

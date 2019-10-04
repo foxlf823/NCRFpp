@@ -82,6 +82,8 @@ class Data:
         self.word_emb_dim = 50
         self.char_emb_dim = 30
 
+        self.tune_wordemb = True
+
         ###Networks
         self.word_feature_extractor = "LSTM" ## "LSTM"/"CNN"/"GRU"/
         self.use_char = True
@@ -143,6 +145,7 @@ class Data:
         print("     Char embedding size: %s"%(self.char_emb_dim))
         print("     Norm   word     emb: %s"%(self.norm_word_emb))
         print("     Norm   char     emb: %s"%(self.norm_char_emb))
+        print("     tune_wordemb: %s" % (self.tune_wordemb))
         print("     Dataset: %s"%(self.dataset))
         print("     Train  file directory: %s"%(self.train_dir))
         print("     Dev    file directory: %s"%(self.dev_dir))
@@ -488,6 +491,10 @@ class Data:
         the_item = 'char_emb_dim'
         if the_item in config:
             self.char_emb_dim = int(config[the_item])
+
+        the_item = 'tune_wordemb'
+        if the_item in config:
+            self.tune_wordemb = str2bool(config[the_item])
 
         ## read network:
         the_item = 'use_crf'

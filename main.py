@@ -388,6 +388,13 @@ def train(data):
     else:
         print("Optimizer illegal: %s"%(data.optimizer))
         exit(1)
+
+    def freeze_net(model):
+        for p in model.word_hidden.wordrep.word_embedding.parameters():
+            p.requires_grad = False
+    if data.tune_wordemb == False:
+        freeze_net(model)
+
     best_dev = -10
     best_test = -10
     bad_counter = 0

@@ -164,6 +164,128 @@ def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, l
             label_Ids = []
     return instence_texts, instence_Ids
 
+from constant import SOS, EOS
+
+def read_lm_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, label_alphabet, number_normalized, max_sent_length, sentence_classification=False, split_token='\t', lowercase_tokens=False, char_padding_size=-1, char_padding_symbol = '</pad>'):
+    feature_num = len(feature_alphabets)
+    in_lines = open(input_file,'r', encoding="utf8").readlines()
+    instence_texts = []
+    instence_Ids = []
+    words = []
+    words_processed = []
+    features = []
+    chars = []
+    labels_forward = []
+    labels_backward = []
+    word_Ids = []
+    feature_Ids = []
+    char_Ids = []
+    label_forward_Ids = []
+    label_backward_Ids = []
+
+    for line in in_lines:
+        line = line.strip()
+        if len(line) > 0:
+            pairs = line.split()
+            word = pairs[0]
+            if sys.version_info[0] < 3:
+                word = word.decode('utf-8')
+            words.append(word)
+            if number_normalized:
+                word = normalize_word(word)
+            if lowercase_tokens:
+                word = word.lower()
+            words_processed.append(word)
+            word_Ids.append(word_alphabet.get_index(word))
+            ## get features
+            feat_list = []
+            feat_Id = []
+            for idx in range(feature_num):
+                feat_idx = pairs[idx+1].split(']',1)[-1]
+                feat_list.append(feat_idx)
+                feat_Id.append(feature_alphabets[idx].get_index(feat_idx))
+            features.append(feat_list)
+            feature_Ids.append(feat_Id)
+            ## get char
+            char_list = []
+            char_Id = []
+            for char in word:
+                char_list.append(char)
+            if char_padding_size > 0:
+                char_number = len(char_list)
+                if char_number < char_padding_size:
+                    char_list = char_list + [char_padding_symbol]*(char_padding_size-char_number)
+                assert(len(char_list) == char_padding_size)
+            else:
+                ### not padding
+                pass
+            for char in char_list:
+                char_Id.append(char_alphabet.get_index(char))
+            chars.append(char_list)
+            char_Ids.append(char_Id)
+        else:
+            if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)) :
+                for idx, word in enumerate(words):
+                    if idx == len(words)-1:
+                        labels_forward.append(EOS)
+                        label_forward_Ids.append(label_alphabet.get_index(EOS))
+                    else:
+                        labels_forward.append(words[idx+1])
+                        label_forward_Ids.append(label_alphabet.get_index(words[idx+1]))
+
+                    if idx == 0:
+                        labels_backward.append(SOS)
+                        label_backward_Ids.append(label_alphabet.get_index(SOS))
+                    else:
+                        labels_backward.append(words[idx-1])
+                        label_backward_Ids.append(label_alphabet.get_index(words[idx-1]))
+
+
+                instence_texts.append([words, features, chars, labels_forward, labels_backward, words_processed])
+                instence_Ids.append([word_Ids, feature_Ids, char_Ids, label_forward_Ids, label_backward_Ids])
+            words = []
+            words_processed = []
+            features = []
+            chars = []
+            labels_forward = []
+            labels_backward = []
+            word_Ids = []
+            feature_Ids = []
+            char_Ids = []
+            label_forward_Ids = []
+            label_backward_Ids = []
+    if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)) :
+
+        for idx, word in enumerate(words):
+            if idx == len(words) - 1:
+                labels_forward.append(EOS)
+                label_forward_Ids.append(label_alphabet.get_index(EOS))
+            else:
+                labels_forward.append(words[idx + 1])
+                label_forward_Ids.append(label_alphabet.get_index(words[idx + 1]))
+
+            if idx == 0:
+                labels_backward.append(SOS)
+                label_backward_Ids.append(label_alphabet.get_index(SOS))
+            else:
+                labels_backward.append(words[idx - 1])
+                label_backward_Ids.append(label_alphabet.get_index(words[idx - 1]))
+
+        instence_texts.append([words, features, chars, labels_forward, labels_backward, words_processed])
+        instence_Ids.append([word_Ids, feature_Ids, char_Ids, label_forward_Ids, label_backward_Ids])
+        words = []
+        words_processed = []
+        features = []
+        chars = []
+        labels_forward = []
+        labels_backward = []
+        word_Ids = []
+        feature_Ids = []
+        char_Ids = []
+        label_forward_Ids = []
+        label_backward_Ids = []
+    return instence_texts, instence_Ids
+
 
 def build_pretrain_embedding(embedding_path, word_alphabet, embedd_dim=100, norm=True):
     embedd_dict = dict()

@@ -19,6 +19,8 @@ START = "</s>"
 UNKNOWN = "</unk>"
 PADDING = "</pad>"
 
+from constant import SOS, EOS
+
 class Data:
     def __init__(self):
         self.sentence_classification = False
@@ -120,6 +122,8 @@ class Data:
         self.use_elmo = False
         self.elmo_gamma = 1.0
 
+        self.mode = 'ner' # ner, lm, ner_lm
+
 
     def show_data_summary(self):
         
@@ -204,6 +208,10 @@ class Data:
         print("     use_elmo: %s" % (self.use_elmo))
         print("     elmo_gamma: %s" % (self.elmo_gamma))
 
+        print(" " + "++" * 20)
+        print(" domain adaptation:")
+        print("     mode: %s" % (self.mode))
+
         print("DATA SUMMARY END.")
         print("++"*50)
         sys.stdout.flush()
@@ -241,10 +249,11 @@ class Data:
     def build_alphabet(self, input_file):
         in_lines = open(input_file,'r').readlines()
         for line in in_lines:
-            if len(line) > 2:
+            line = line.strip()
+            if len(line) > 0:
                 ## if sentence classification data format, splited by \t
                 if self.sentence_classification:
-                    pairs = line.strip().split(self.split_token)
+                    pairs = line.split(self.split_token)
                     sent = pairs[0]
                     if sys.version_info[0] < 3:
                         sent = sent.decode('utf-8')
@@ -264,7 +273,7 @@ class Data:
 
                 ## if sequence labeling data format i.e. CoNLL 2003
                 else:
-                    pairs = line.strip().split()
+                    pairs = line.split()
                     word = pairs[0]
                     if sys.version_info[0] < 3:
                         word = word.decode('utf-8')
@@ -281,23 +290,33 @@ class Data:
                         self.feature_alphabets[idx].add(feat_idx)
                     for char in word:
                         self.char_alphabet.add(char)
+
+        if self.mode == 'lm':
+            self.label_alphabet.add(SOS)
+            self.label_alphabet.add(EOS)
+
         self.word_alphabet_size = self.word_alphabet.size()
         self.char_alphabet_size = self.char_alphabet.size()
         self.label_alphabet_size = self.label_alphabet.size()
         for idx in range(self.feature_num):
             self.feature_alphabet_sizes[idx] = self.feature_alphabets[idx].size()
-        startS = False
-        startB = False
-        for label,_ in self.label_alphabet.iteritems():
-            if "S-" in label.upper():
-                startS = True
-            elif "B-" in label.upper():
-                startB = True
-        if startB:
-            if startS:
-                self.tagScheme = "BMES"
-            else:
-                self.tagScheme = "BIO"
+
+        if self.mode == 'lm':
+            self.tagScheme = 'NoSeg'
+        else:
+            startS = False
+            startB = False
+            for label,_ in self.label_alphabet.iteritems():
+                if "S-" in label.upper():
+                    startS = True
+                elif "B-" in label.upper():
+                    startB = True
+            if startB:
+                if startS:
+                    self.tagScheme = "BMES"
+                else:
+                    self.tagScheme = "BIO"
+
         if self.sentence_classification:
             self.tagScheme = "Not sequence labeling task"
 
@@ -325,16 +344,40 @@ class Data:
 
     def generate_instance(self, name):
         self.fix_alphabet()
-        if name == "train":
-            self.train_texts, self.train_Ids = read_instance(self.train_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
-        elif name == "dev":
-            self.dev_texts, self.dev_Ids = read_instance(self.dev_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
-        elif name == "test":
-            self.test_texts, self.test_Ids = read_instance(self.test_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
-        elif name == "raw":
-            self.raw_texts, self.raw_Ids = read_instance(self.raw_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
+        if self.mode == 'ner':
+            if name == "train":
+                self.train_texts, self.train_Ids = read_instance(self.train_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
+            elif name == "dev":
+                self.dev_texts, self.dev_Ids = read_instance(self.dev_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
+            elif name == "test":
+                self.test_texts, self.test_Ids = read_instance(self.test_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
+            elif name == "raw":
+                self.raw_texts, self.raw_Ids = read_instance(self.raw_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
+            else:
+                print("Error: you can only generate train/dev/test instance! Illegal input:%s"%(name))
+        elif self.mode == 'lm':
+            if name == "train":
+                self.train_texts, self.train_Ids = read_lm_instance(self.train_dir, self.word_alphabet, self.char_alphabet,
+                                                                 self.feature_alphabets, self.label_alphabet,
+                                                                 self.number_normalized, self.MAX_SENTENCE_LENGTH,
+                                                                 self.sentence_classification, self.split_token,
+                                                                 self.lowercase_tokens)
+            elif name == "dev":
+                self.dev_texts, self.dev_Ids = read_lm_instance(self.dev_dir, self.word_alphabet, self.char_alphabet,
+                                                             self.feature_alphabets, self.label_alphabet,
+                                                             self.number_normalized, self.MAX_SENTENCE_LENGTH,
+                                                             self.sentence_classification, self.split_token,
+                                                             self.lowercase_tokens)
+            elif name == "test":
+                self.test_texts, self.test_Ids = read_lm_instance(self.test_dir, self.word_alphabet, self.char_alphabet,
+                                                               self.feature_alphabets, self.label_alphabet,
+                                                               self.number_normalized, self.MAX_SENTENCE_LENGTH,
+                                                               self.sentence_classification, self.split_token,
+                                                               self.lowercase_tokens)
+            else:
+                print("Error: you can only generate train/dev/test instance! Illegal input:%s" % (name))
         else:
-            print("Error: you can only generate train/dev/test instance! Illegal input:%s"%(name))
+            raise RuntimeError('model error')
 
 
     def write_decoded_results(self, predict_results, name):
@@ -601,6 +644,11 @@ class Data:
         the_item = 'elmo_gamma'
         if the_item in config:
             self.elmo_gamma = float(config[the_item])
+
+        # domain adaptation
+        the_item = 'mode'
+        if the_item in config:
+            self.mode = config[the_item]
 
 
 

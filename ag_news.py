@@ -36,12 +36,10 @@ corpus_path = './newsSpace'
 #     in_fp.close()
 #     out_fp.close()
 
-# source_filter = {'Yahoo World', 'Yahoo Business', 'Yahoo Sports', 'Yahoo News',
-#                  'Yahoo U.S.', 'Yahoo Politics', 'Yahoo Tech', 'Yahoo Science', 'Yahoo Health', 'Yahoo Europe'}
-source_filter = {'Reuters World', 'Reuters Top News', 'Reuters Business', 'Reuters AlertNet', 'Reuters U.S.', 'Reuters',
-                 'Reuters Life and Leisure', 'Reuters Health', 'Reuters Tech', 'Reuters Entertainment', 'Reuters Sports'}
 
-def read(input_path):
+
+
+def read(input_path, source_filter):
     all_news = []
     fp = open(input_path, 'r', encoding='iso-8859-1', newline='\n')
     one_news = ''
@@ -121,13 +119,10 @@ def read(input_path):
 
 from my_utils import my_tokenize
 import nltk
+sent_tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
 
-if __name__ == '__main__':
-    # clean('./newsSpace', './newsSpace_clean')
-    all_news = read('./newsSpace')
+def do_statistics(all_news):
 
-    # do statistics
-    sent_tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
     source = set()
     type = set()
     typed_sentences = {}
@@ -158,5 +153,73 @@ if __name__ == '__main__':
     print("news number: {}".format(len(all_news)))
     for type, sentences in typed_sentences.items():
         print("type: {}, sent num: {}".format(type, len(sentences)))
+
+def to_conll(all_news, source_filter, type_filter, out_file):
+    out_f = codecs.open(out_file, 'w', 'utf-8')
+    sent_num = 0
+
+    for news in all_news:
+        if news['source'] not in source_filter:
+            continue
+        if news['category'] not in type_filter:
+            continue
+
+        tokens = my_tokenize(news['title'])
+        for token in tokens:
+            out_f.write(token + "\n")
+
+        out_f.write("\n")
+        sent_num += 1
+
+        all_sents_inds = []
+        generator = sent_tokenizer.span_tokenize(news['description'])
+        for t in generator:
+            all_sents_inds.append(t)
+
+        for ind in range(len(all_sents_inds)):
+            t_start = all_sents_inds[ind][0]
+            t_end = all_sents_inds[ind][1]
+            sent_text = news['description'][t_start:t_end]
+
+            tokens = my_tokenize(sent_text)
+            for token in tokens:
+                out_f.write(token + "\n")
+
+            out_f.write("\n")
+            sent_num += 1
+
+
+
+    out_f.close()
+    print("write {} into {}".format(sent_num, out_file))
+
+
+if __name__ == '__main__':
+    # clean('./newsSpace', './newsSpace_clean')
+
+
+    # source_filter = {'Yahoo World', 'Yahoo Business', 'Yahoo Sports', 'Yahoo News',
+    #                  'Yahoo U.S.', 'Yahoo Politics', 'Yahoo Tech', 'Yahoo Science', 'Yahoo Health', 'Yahoo Europe'}
+    # all_news = read('./newsSpace', source_filter)
+    # do_statistics(all_news)
+    # source_filter = {'Reuters World', 'Reuters Top News', 'Reuters Business', 'Reuters AlertNet', 'Reuters U.S.', 'Reuters',
+    #                  'Reuters Life and Leisure', 'Reuters Health', 'Reuters Tech', 'Reuters Entertainment', 'Reuters Sports'}
+    # all_news = read('./newsSpace', source_filter)
+    # do_statistics(all_news)
+
+    # source_filter = {'Yahoo Tech', 'Yahoo Science', 'Reuters', 'Reuters Tech'}
+    # all_news = read('./newsSpace', source_filter)
+    # type_filter = {'Sci/Tech'}
+    # to_conll(all_news, source_filter, type_filter, 'lm_data/lm_sci.txt')
+
+    # source_filter = {'Reuters World', 'Reuters Top News', 'Reuters Business', 'Reuters AlertNet', 'Reuters U.S.', 'Reuters',
+    #                  'Reuters Life and Leisure', 'Reuters Health', 'Reuters Tech', 'Reuters Entertainment', 'Reuters Sports'}
+    # all_news = read('./newsSpace', source_filter)
+    # type_filter = {'Business', 'Entertainment', 'Sports', 'World'}
+    # to_conll(all_news, source_filter, type_filter, 'lm_data/lm_general.txt')
+
+    pass
+
+
 
 

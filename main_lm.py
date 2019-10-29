@@ -15,8 +15,6 @@ np.random.seed(seed_num)
 def data_initialization(data):
     data.initial_feature_alphabets()
     data.build_alphabet(data.train_dir)
-    data.build_alphabet(data.dev_dir)
-    data.build_alphabet(data.test_dir)
     data.fix_alphabet()
 
 def predict_check(pred_variable, gold_variable, mask_variable, sentence_classification=False):
@@ -277,8 +275,6 @@ if __name__ == '__main__':
         print("MODEL: train")
         data_initialization(data)
         data.generate_instance('train')
-        data.generate_instance('dev')
-        data.generate_instance('test')
         data.build_pretrain_emb()
         train(data)
     elif status == 'decode':

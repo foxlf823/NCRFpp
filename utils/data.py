@@ -123,6 +123,17 @@ class Data:
         self.elmo_gamma = 1.0
 
         self.mode = 'ner' # ner, lm, ner_lm
+        self.lm_model_dir = None
+        self.s_lm = None
+        self.t_lm = None
+        self.s_ner_train = None
+        self.s_ner_eval = None
+        self.s_label_alphabet = Alphabet('label', True)
+        self.s_label_alphabet_size = 0
+        self.s_train_texts = []
+        self.s_dev_texts = []
+        self.s_train_Ids = []
+        self.s_dev_Ids = []
 
 
     def show_data_summary(self):
@@ -211,6 +222,14 @@ class Data:
         print(" " + "++" * 20)
         print(" domain adaptation:")
         print("     mode: %s" % (self.mode))
+        print("     lm_model_dir: %s" % (self.lm_model_dir))
+        print("     s_lm: %s" % (self.s_lm))
+        print("     t_lm: %s" % (self.t_lm))
+        print("     s_ner_train: %s" % (self.s_ner_train))
+        print("     s_ner_eval: %s" % (self.s_ner_eval))
+        print("     s_label_alphabet_size: %s" % (self.s_label_alphabet_size))
+        print("     Source Train instance number: %s"%(len(self.s_train_texts)))
+        print("     Srouce Dev   instance number: %s"%(len(self.s_dev_texts)))
 
         print("DATA SUMMARY END.")
         print("++"*50)
@@ -245,8 +264,28 @@ class Data:
                     self.norm_feature_embs[idx] = self.feat_config[self.feature_name[idx]]['emb_norm']
         # exit(0)
 
+    def build_lm_alphabet(self, input_file):
+        in_lines = open(input_file, 'r').readlines()
+        for line in in_lines:
+            line = line.strip()
+            if len(line) > 0:
+                pairs = line.split()
+                word = pairs[0]
+                if sys.version_info[0] < 3:
+                    word = word.decode('utf-8')
+                if self.number_normalized:
+                    word = normalize_word(word)
+                if self.lowercase_tokens:
+                    word = word.lower()
+                self.word_alphabet.add(word)
+                for char in word:
+                    self.char_alphabet.add(char)
 
-    def build_alphabet(self, input_file):
+        self.word_alphabet_size = self.word_alphabet.size()
+        self.char_alphabet_size = self.char_alphabet.size()
+
+
+    def build_alphabet(self, input_file, target=True, build_label_alphabet=True):
         in_lines = open(input_file,'r').readlines()
         for line in in_lines:
             line = line.strip()
@@ -265,7 +304,12 @@ class Data:
                         for char in word:
                             self.char_alphabet.add(char)
                     label = pairs[-1]
-                    self.label_alphabet.add(label)
+                    if target:
+                        if build_label_alphabet:
+                            self.label_alphabet.add(label)
+                    else:
+                        if build_label_alphabet:
+                            self.s_label_alphabet.add(label)
                     ## build feature alphabet
                     for idx in range(self.feature_num):
                         feat_idx = pairs[idx+1].split(']',1)[-1]
@@ -282,7 +326,12 @@ class Data:
                     if self.lowercase_tokens:
                         word = word.lower()
                     label = pairs[-1]
-                    self.label_alphabet.add(label)
+                    if target:
+                        if build_label_alphabet:
+                            self.label_alphabet.add(label)
+                    else:
+                        if build_label_alphabet:
+                            self.s_label_alphabet.add(label)
                     self.word_alphabet.add(word)
                     ## build feature alphabet
                     for idx in range(self.feature_num):
@@ -291,13 +340,16 @@ class Data:
                     for char in word:
                         self.char_alphabet.add(char)
 
-        if self.mode == 'lm':
+        if self.mode == 'lm' and build_label_alphabet:
             self.label_alphabet.add(SOS)
             self.label_alphabet.add(EOS)
 
         self.word_alphabet_size = self.word_alphabet.size()
         self.char_alphabet_size = self.char_alphabet.size()
-        self.label_alphabet_size = self.label_alphabet.size()
+        if target:
+            self.label_alphabet_size = self.label_alphabet.size()
+        else:
+            self.s_label_alphabet_size = self.s_label_alphabet.size()
         for idx in range(self.feature_num):
             self.feature_alphabet_sizes[idx] = self.feature_alphabets[idx].size()
 
@@ -325,6 +377,7 @@ class Data:
         self.word_alphabet.close()
         self.char_alphabet.close()
         self.label_alphabet.close()
+        self.s_label_alphabet.close()
         for idx in range(self.feature_num):
             self.feature_alphabets[idx].close()
 
@@ -344,7 +397,8 @@ class Data:
 
     def generate_instance(self, name):
         self.fix_alphabet()
-        if self.mode == 'ner':
+
+        if self.mode == 'ner' or self.mode == 'lm_ner' or self.mode == 'finetune':
             if name == "train":
                 self.train_texts, self.train_Ids = read_instance(self.train_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
             elif name == "dev":
@@ -353,6 +407,18 @@ class Data:
                 self.test_texts, self.test_Ids = read_instance(self.test_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
             elif name == "raw":
                 self.raw_texts, self.raw_Ids = read_instance(self.raw_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
+            elif name == 's_train':
+                self.s_train_texts, self.s_train_Ids = read_instance(self.s_ner_train, self.word_alphabet, self.char_alphabet,
+                                                                 self.feature_alphabets, self.s_label_alphabet,
+                                                                 self.number_normalized, self.MAX_SENTENCE_LENGTH,
+                                                                 self.sentence_classification, self.split_token,
+                                                                 self.lowercase_tokens)
+            elif name == 's_dev':
+                self.s_dev_texts, self.s_dev_Ids = read_instance(self.s_ner_eval, self.word_alphabet, self.char_alphabet,
+                                                             self.feature_alphabets, self.s_label_alphabet,
+                                                             self.number_normalized, self.MAX_SENTENCE_LENGTH,
+                                                             self.sentence_classification, self.split_token,
+                                                             self.lowercase_tokens)
             else:
                 print("Error: you can only generate train/dev/test instance! Illegal input:%s"%(name))
         elif self.mode == 'lm':
@@ -649,7 +715,21 @@ class Data:
         the_item = 'mode'
         if the_item in config:
             self.mode = config[the_item]
-
+        the_item = 'lm_model_dir'
+        if the_item in config:
+            self.lm_model_dir = config[the_item]
+        the_item = 's_lm'
+        if the_item in config:
+            self.s_lm = config[the_item]
+        the_item = 't_lm'
+        if the_item in config:
+            self.t_lm = config[the_item]
+        the_item = 's_ner_train'
+        if the_item in config:
+            self.s_ner_train = config[the_item]
+        the_item = 's_ner_eval'
+        if the_item in config:
+            self.s_ner_eval = config[the_item]
 
 
 def config_file_to_dict(input_file):

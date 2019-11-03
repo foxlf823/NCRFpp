@@ -9,12 +9,12 @@ from __future__ import absolute_import
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .wordsequence1 import WordSequence1
+from .wordsequence2 import WordSequence2
 from .crf import CRF
 
-class SeqLabel1(nn.Module):
+class SeqLabel2(nn.Module):
     def __init__(self, data, target=True):
-        super(SeqLabel1, self).__init__()
+        super(SeqLabel2, self).__init__()
         self.use_crf = data.use_crf
         print("build sequence labeling network...")
         print("use_char: ", data.use_char)
@@ -33,7 +33,7 @@ class SeqLabel1(nn.Module):
             label_size = data.s_label_alphabet_size
             data.s_label_alphabet_size += 2
 
-        self.word_hidden = WordSequence1(data)
+        self.word_hidden = WordSequence2(data)
 
         # The linear layer that maps from hidden state space to tag space
         self.use_elmo = data.use_elmo
@@ -49,11 +49,11 @@ class SeqLabel1(nn.Module):
             self.crf = CRF(label_size, self.gpu)
 
 
-
-    def calculate_loss(self, word_inputs, word_backward_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, batch_label, mask,
-                       elmo_char_inputs):
-        hidden_forward, hidden_backward = self.word_hidden(word_inputs, word_backward_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs)
-        outs = self.hidden2tag(torch.cat([hidden_forward, hidden_backward], 2))
+    def calculate_loss(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, batch_label, mask,
+                       elmo_char_inputs, target=True):
+        outs = self.word_hidden(word_inputs,feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs, target)
+        ## outs (batch_size, seq_len, hidden_size)
+        outs = self.hidden2tag(outs)
 
         batch_size = word_inputs.size(0)
         seq_len = word_inputs.size(1)
@@ -72,10 +72,11 @@ class SeqLabel1(nn.Module):
         return total_loss, tag_seq
 
 
-    def forward(self, word_inputs, word_backward_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, mask,
-                elmo_char_inputs):
-        hidden_forward, hidden_backward = self.word_hidden(word_inputs, word_backward_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs)
-        outs = self.hidden2tag(torch.cat([hidden_forward, hidden_backward], 2))
+    def forward(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, mask,
+                elmo_char_inputs, target=True):
+        outs = self.word_hidden(word_inputs,feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs, target)
+        ## outs (batch_size, seq_len, hidden_size)
+        outs = self.hidden2tag(outs)
 
         batch_size = word_inputs.size(0)
         seq_len = word_inputs.size(1)
@@ -89,9 +90,11 @@ class SeqLabel1(nn.Module):
             tag_seq = mask.long() * tag_seq
         return tag_seq
 
+
+    # def get_lstm_features(self, word_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover):
+    #     return self.word_hidden(word_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover)
+
+
     def decode_nbest(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, mask, nbest,
                      elmo_char_inputs):
-        raise RuntimeError("not support")
-
-
-
+        raise RuntimeError('not support')

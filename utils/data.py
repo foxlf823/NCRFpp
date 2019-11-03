@@ -124,6 +124,7 @@ class Data:
 
         self.mode = 'ner' # ner, lm, ner_lm
         self.lm_model_dir = None
+        self.lm_obj_acc = 0
         self.s_lm = None
         self.t_lm = None
         self.s_ner_train = None
@@ -134,6 +135,7 @@ class Data:
         self.s_dev_texts = []
         self.s_train_Ids = []
         self.s_dev_Ids = []
+        self.batch_norm = False
 
 
     def show_data_summary(self):
@@ -223,13 +225,15 @@ class Data:
         print(" domain adaptation:")
         print("     mode: %s" % (self.mode))
         print("     lm_model_dir: %s" % (self.lm_model_dir))
+        print("     lm_obj_acc: %s" % (self.lm_obj_acc))
         print("     s_lm: %s" % (self.s_lm))
         print("     t_lm: %s" % (self.t_lm))
         print("     s_ner_train: %s" % (self.s_ner_train))
         print("     s_ner_eval: %s" % (self.s_ner_eval))
         print("     s_label_alphabet_size: %s" % (self.s_label_alphabet_size))
         print("     Source Train instance number: %s"%(len(self.s_train_texts)))
-        print("     Srouce Dev   instance number: %s"%(len(self.s_dev_texts)))
+        print("     Source Dev   instance number: %s"%(len(self.s_dev_texts)))
+        print("     batch normalization: %s" % (self.batch_norm))
 
         print("DATA SUMMARY END.")
         print("++"*50)
@@ -285,7 +289,7 @@ class Data:
         self.char_alphabet_size = self.char_alphabet.size()
 
 
-    def build_alphabet(self, input_file, target=True, build_label_alphabet=True):
+    def build_alphabet(self, input_file, build_label_alphabet=True, target=True, ner_data=True):
         in_lines = open(input_file,'r').readlines()
         for line in in_lines:
             line = line.strip()
@@ -303,12 +307,11 @@ class Data:
                         self.word_alphabet.add(word)
                         for char in word:
                             self.char_alphabet.add(char)
-                    label = pairs[-1]
-                    if target:
-                        if build_label_alphabet:
+                    label = pairs[0] if self.mode=='lm' and ner_data else pairs[-1]
+                    if build_label_alphabet:
+                        if target:
                             self.label_alphabet.add(label)
-                    else:
-                        if build_label_alphabet:
+                        else:
                             self.s_label_alphabet.add(label)
                     ## build feature alphabet
                     for idx in range(self.feature_num):
@@ -325,12 +328,11 @@ class Data:
                         word = normalize_word(word)
                     if self.lowercase_tokens:
                         word = word.lower()
-                    label = pairs[-1]
-                    if target:
-                        if build_label_alphabet:
+                    label = pairs[0] if self.mode=='lm' and ner_data else pairs[-1]
+                    if build_label_alphabet:
+                        if target:
                             self.label_alphabet.add(label)
-                    else:
-                        if build_label_alphabet:
+                        else:
                             self.s_label_alphabet.add(label)
                     self.word_alphabet.add(word)
                     ## build feature alphabet
@@ -346,10 +348,11 @@ class Data:
 
         self.word_alphabet_size = self.word_alphabet.size()
         self.char_alphabet_size = self.char_alphabet.size()
-        if target:
-            self.label_alphabet_size = self.label_alphabet.size()
-        else:
-            self.s_label_alphabet_size = self.s_label_alphabet.size()
+        if build_label_alphabet:
+            if target:
+                self.label_alphabet_size = self.label_alphabet.size()
+            else:
+                self.s_label_alphabet_size = self.s_label_alphabet.size()
         for idx in range(self.feature_num):
             self.feature_alphabet_sizes[idx] = self.feature_alphabets[idx].size()
 
@@ -398,7 +401,7 @@ class Data:
     def generate_instance(self, name):
         self.fix_alphabet()
 
-        if self.mode == 'ner' or self.mode == 'lm_ner' or self.mode == 'finetune':
+        if self.mode == 'ner' or self.mode == 'lm_ner' or self.mode == 'finetune' or self.mode == 'lm_finetune':
             if name == "train":
                 self.train_texts, self.train_Ids = read_instance(self.train_dir, self.word_alphabet, self.char_alphabet, self.feature_alphabets, self.label_alphabet, self.number_normalized, self.MAX_SENTENCE_LENGTH, self.sentence_classification, self.split_token, self.lowercase_tokens)
             elif name == "dev":
@@ -423,13 +426,13 @@ class Data:
                 print("Error: you can only generate train/dev/test instance! Illegal input:%s"%(name))
         elif self.mode == 'lm':
             if name == "train":
-                self.train_texts, self.train_Ids = read_lm_instance(self.train_dir, self.word_alphabet, self.char_alphabet,
+                self.train_texts, self.train_Ids = read_lm_instance(self.s_lm, self.word_alphabet, self.char_alphabet,
                                                                  self.feature_alphabets, self.label_alphabet,
                                                                  self.number_normalized, self.MAX_SENTENCE_LENGTH,
                                                                  self.sentence_classification, self.split_token,
                                                                  self.lowercase_tokens)
             elif name == "dev":
-                self.dev_texts, self.dev_Ids = read_lm_instance(self.dev_dir, self.word_alphabet, self.char_alphabet,
+                self.dev_texts, self.dev_Ids = read_lm_instance(self.t_lm, self.word_alphabet, self.char_alphabet,
                                                              self.feature_alphabets, self.label_alphabet,
                                                              self.number_normalized, self.MAX_SENTENCE_LENGTH,
                                                              self.sentence_classification, self.split_token,
@@ -718,6 +721,9 @@ class Data:
         the_item = 'lm_model_dir'
         if the_item in config:
             self.lm_model_dir = config[the_item]
+        the_item = 'lm_obj_acc'
+        if the_item in config:
+            self.lm_obj_acc = float(config[the_item])
         the_item = 's_lm'
         if the_item in config:
             self.s_lm = config[the_item]
@@ -730,6 +736,9 @@ class Data:
         the_item = 's_ner_eval'
         if the_item in config:
             self.s_ner_eval = config[the_item]
+        the_item = 'batch_norm'
+        if the_item in config:
+            self.batch_norm = str2bool(config[the_item])
 
 
 def config_file_to_dict(input_file):

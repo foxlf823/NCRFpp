@@ -125,7 +125,7 @@ def batchify_sequence_labeling_with_label(input_batch_list, input_text_batch_lis
         elmo_char_seq_tensor = elmo_char_seq_tensor.cuda(gpu)
     return word_seq_tensor,feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, label_forward_seq_tensor, label_backward_seq_tensor, mask, elmo_char_seq_tensor
 
-from model.lm import LanguageModel
+from model.lm1 import LanguageModel1
 import torch.optim as optim
 import time
 
@@ -140,10 +140,10 @@ def lr_decay(optimizer, epoch, decay_rate, init_lr):
 def train(data):
     print("Training model...")
     data.show_data_summary()
-    save_data_name = data.model_dir +".dset"
+    save_data_name = data.lm_model_dir +".dset"
     data.save(save_data_name)
 
-    model = LanguageModel(data)
+    model = LanguageModel1(data)
 
     if data.optimizer.lower() == "sgd":
         optimizer = optim.SGD(model.parameters(), lr=data.HP_lr, momentum=data.HP_momentum,weight_decay=data.HP_l2)
@@ -165,48 +165,57 @@ def train(data):
     if data.tune_wordemb == False:
         freeze_net(model)
 
+    train_on_domain(model, data.HP_iteration, data.optimizer, optimizer, data.HP_lr_decay, data.HP_lr, data.HP_batch_size,
+                    data.sentence_classification, data.HP_gpu, data.lm_model_dir, data.patience, data.lm_obj_acc,
+                    data.train_texts, data.train_Ids, target=False)
+
+    train_on_domain(model, data.HP_iteration, data.optimizer, optimizer, data.HP_lr_decay, data.HP_lr, data.HP_batch_size,
+                    data.sentence_classification, data.HP_gpu, data.lm_model_dir, data.patience, data.lm_obj_acc,
+                    data.dev_texts, data.dev_Ids, target=True)
+
+
+def train_on_domain(model, iteration, optim_name, optimizer, lr_decay, lr, batch_size, sent_class, gpu, lm_model_dir, patience,
+                    lm_obj_acc, texts, ids, target=True):
     best_dev = -10
-    best_test = -10
     bad_counter = 0
-    # data.HP_iteration = 1
     ## start training
-    for idx in range(data.HP_iteration):
+    for idx in range(iteration):
         epoch_start = time.time()
         temp_start = epoch_start
-        print("Epoch: %s/%s" %(idx,data.HP_iteration))
-        if data.optimizer == "SGD":
-            optimizer = lr_decay(optimizer, idx, data.HP_lr_decay, data.HP_lr)
+        print("Epoch: %s/%s" %(idx,iteration))
+        if optim_name == "SGD":
+            optimizer = lr_decay(optimizer, idx, lr_decay, lr)
         instance_count = 0
         sample_id = 0
         sample_loss = 0
         total_loss = 0
         right_token = 0
         whole_token = 0
-        cc = list(zip(data.train_Ids, data.train_texts))
+        cc = list(zip(ids, texts))
         random.shuffle(cc)
-        data.train_Ids[:], data.train_texts[:] = zip(*cc)
-        print("Shuffle: first input word list:", data.train_Ids[0][0])
+        ids[:], texts[:] = zip(*cc)
+        print("Shuffle: first input word list:", ids[0][0])
         ## set model in train model
         model.train()
         model.zero_grad()
-        batch_size = data.HP_batch_size
-        batch_id = 0
-        train_num = len(data.train_Ids)
+        train_num = len(ids)
         total_batch = train_num//batch_size+1
         for batch_id in range(total_batch):
             start = batch_id*batch_size
             end = (batch_id+1)*batch_size
             if end >train_num:
                 end = train_num
-            instance = data.train_Ids[start:end]
-            instance_text = data.train_texts[start:end]
+            instance = ids[start:end]
+            instance_text = texts[start:end]
             if not instance:
                 continue
-            batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label_forward, batch_label_backward, mask, batch_elmo_char = batchify_with_label(instance, instance_text, data.HP_gpu, True, data.sentence_classification)
+            batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label_forward, \
+                    batch_label_backward, mask, batch_elmo_char = batchify_with_label(instance, instance_text,
+                                                                                      gpu, True, sent_class)
             instance_count += 1
-            loss, tag_seq_forward, tag_seq_backward = model.calculate_loss(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, batch_label_forward, batch_label_backward, mask, batch_elmo_char)
-            right_forward, whole_forward = predict_check(tag_seq_forward, batch_label_forward, mask, data.sentence_classification)
-            right_backward, whole_backward = predict_check(tag_seq_backward, batch_label_backward, mask, data.sentence_classification)
+            loss, tag_seq_forward, tag_seq_backward = model.calculate_loss(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, batch_label_forward, batch_label_backward, mask, batch_elmo_char, target)
+            right_forward, whole_forward = predict_check(tag_seq_forward, batch_label_forward, mask, sent_class)
+            right_backward, whole_backward = predict_check(tag_seq_backward, batch_label_backward, mask, sent_class)
 
             right_token += (right_forward + right_backward)
             whole_token += (whole_forward + whole_backward)
@@ -233,7 +242,7 @@ def train(data):
         epoch_finish = time.time()
         epoch_cost = epoch_finish - epoch_start
         print("Epoch: %s training finished. Time: %.2fs, speed: %.2fst/s,  total loss: %s, acc: %s/%s=%.4f"%(idx, epoch_cost, train_num/epoch_cost, total_loss, right_token, whole_token,(right_token+0.)/whole_token))
-        print("totalloss:", total_loss)
+
         if total_loss > 1e8 or str(total_loss) == "nan":
             print("ERROR: LOSS EXPLOSION (>1e8) ! PLEASE SET PROPER PARAMETERS AND STRUCTURE! EXIT....")
             exit(1)
@@ -245,7 +254,7 @@ def train(data):
 
             print("Exceed previous best acc:", best_dev)
             # model_name = data.model_dir +'.'+ str(idx) + ".model"
-            model_name = data.model_dir + ".lm.model"
+            model_name = lm_model_dir + ".lm.model"
             # print("Save current best model in file:", model_name)
             torch.save(model.state_dict(), model_name)
             best_dev = current_score
@@ -256,9 +265,14 @@ def train(data):
 
         gc.collect()
 
-        if bad_counter >= data.patience:
+        if bad_counter >= patience:
             print('Early Stop!')
             break
+
+        if current_score > lm_obj_acc:
+            print('current accuracy {} > objective accuracy {}, exit ...'.format(current_score, lm_obj_acc))
+            break
+
 
 if __name__ == '__main__':
     print('train a bilstm language model')
@@ -280,6 +294,7 @@ if __name__ == '__main__':
     if status == 'train':
         data_initialization(data)
         data.generate_instance('train')
+        data.generate_instance('dev')
         data.build_pretrain_emb()
         train(data)
     elif status == 'decode':

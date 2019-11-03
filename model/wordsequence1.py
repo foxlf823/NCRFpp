@@ -79,7 +79,7 @@ class WordSequence1(nn.Module):
                 self.lstm_backward = self.lstm_backward.cuda(self.gpu)
 
 
-    def forward(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs):
+    def forward(self, word_inputs, word_backward_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs):
         """
             input:
                 word_inputs: (batch_size, sent_len)

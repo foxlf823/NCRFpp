@@ -140,7 +140,9 @@ def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, l
             else:
                 if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)) :
                     instence_texts.append([words, features, chars, labels, words_processed])
-                    instence_Ids.append([word_Ids, feature_Ids, char_Ids,label_Ids])
+                    word_Ids_backward = word_Ids.copy()
+                    word_Ids_backward.reverse()
+                    instence_Ids.append([word_Ids, feature_Ids, char_Ids,label_Ids, word_Ids_backward])
                 words = []
                 words_processed = []
                 features = []
@@ -152,7 +154,9 @@ def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, l
                 label_Ids = []
         if (len(words) > 0) and ((max_sent_length < 0) or (len(words) < max_sent_length)) :
             instence_texts.append([words, features, chars, labels, words_processed])
-            instence_Ids.append([word_Ids, feature_Ids, char_Ids,label_Ids])
+            word_Ids_backward = word_Ids.copy()
+            word_Ids_backward.reverse()
+            instence_Ids.append([word_Ids, feature_Ids, char_Ids,label_Ids, word_Ids_backward])
             words = []
             words_processed = []
             features = []
@@ -166,7 +170,9 @@ def read_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, l
 
 from constant import SOS, EOS
 
-def read_lm_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, label_alphabet, number_normalized, max_sent_length, sentence_classification=False, split_token='\t', lowercase_tokens=False, char_padding_size=-1, char_padding_symbol = '</pad>'):
+def read_lm_instance(input_file, word_alphabet, char_alphabet, feature_alphabets, label_alphabet, number_normalized, max_sent_length,
+                     sentence_classification=False, split_token='\t', lowercase_tokens=False, char_padding_size=-1,
+                     char_padding_symbol = '</pad>'):
     feature_num = len(feature_alphabets)
     in_lines = open(input_file,'r', encoding="utf8").readlines()
     instence_texts = []

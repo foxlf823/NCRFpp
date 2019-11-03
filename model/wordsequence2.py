@@ -1,0 +1,201 @@
+# -*- coding: utf-8 -*-
+# @Author: Jie Yang
+# @Date:   2017-10-17 16:47:32
+# @Last Modified by:   Jie Yang,     Contact: jieynlp@gmail.com
+# @Last Modified time: 2019-02-01 15:59:26
+from __future__ import print_function
+from __future__ import absolute_import
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from .wordrep import WordRep
+import json
+
+class WordSequence2(nn.Module):
+    def __init__(self, data):
+        super(WordSequence2, self).__init__()
+        print("build word sequence feature extractor: %s..."%(data.word_feature_extractor))
+        self.gpu = data.HP_gpu
+        self.use_char = data.use_char
+        # self.batch_size = data.HP_batch_size
+        # self.hidden_dim = data.HP_hidden_dim
+        self.droplstm = nn.Dropout(data.HP_dropout)
+        self.bilstm_flag = data.HP_bilstm
+        self.lstm_layer = data.HP_lstm_layer
+        self.wordrep = WordRep(data)
+        self.input_size = data.word_emb_dim
+        self.feature_num = data.feature_num
+        self.batch_norm = data.batch_norm
+        if self.use_char:
+            self.input_size += data.HP_char_hidden_dim
+            if data.char_feature_extractor == "ALL":
+                self.input_size += data.HP_char_hidden_dim
+        for idx in range(self.feature_num):
+            self.input_size += data.feature_emb_dims[idx]
+        self.use_elmo = data.use_elmo
+        if self.use_elmo:
+            with open(data.elmo_options_file, 'r') as fin:
+                self._options = json.load(fin)
+            self.input_size += self._options['lstm']['projection_dim']*2
+        # The LSTM takes word embeddings as inputs, and outputs hidden states
+        # with dimensionality hidden_dim.
+        if self.bilstm_flag:
+            lstm_hidden = data.HP_hidden_dim // 2
+        else:
+            lstm_hidden = data.HP_hidden_dim
+
+        self.word_feature_extractor = data.word_feature_extractor
+        if self.word_feature_extractor == "GRU":
+            self.lstm = nn.GRU(self.input_size, lstm_hidden, num_layers=self.lstm_layer, batch_first=True, bidirectional=self.bilstm_flag)
+        elif self.word_feature_extractor == "LSTM":
+            if self.use_elmo:
+                self.lstm1 = nn.LSTM(self.input_size, lstm_hidden, num_layers=1, batch_first=True, bidirectional=self.bilstm_flag)
+                self.lstm2 = nn.LSTM(lstm_hidden*2, lstm_hidden // 2, num_layers=1, batch_first=True, bidirectional=self.bilstm_flag)
+            else:
+                if self.batch_norm:
+                    self.lstm = nn.ModuleList()
+                    self.bn_s = nn.ModuleList()
+                    self.bn_t = nn.ModuleList()
+                    for lstm_layer_idx in range(self.lstm_layer):
+                        in_size = self.input_size if lstm_layer_idx == 0 else lstm_hidden*2
+                        self.lstm.add_module('lstm_{}'.format(lstm_layer_idx), nn.LSTM(in_size, lstm_hidden, 1, batch_first=True, bidirectional=True))
+                        self.bn_s.add_module('bn_s_{}'.format(lstm_layer_idx), nn.BatchNorm1d(in_size))
+                        self.bn_t.add_module('bn_t_{}'.format(lstm_layer_idx), nn.BatchNorm1d(in_size))
+
+                else:
+                    self.lstm = nn.LSTM(self.input_size, lstm_hidden, num_layers=self.lstm_layer, batch_first=True, bidirectional=self.bilstm_flag)
+
+        elif self.word_feature_extractor == "CNN":
+            # cnn_hidden = data.HP_hidden_dim
+            self.word2cnn = nn.Linear(self.input_size, data.HP_hidden_dim)
+            self.cnn_layer = data.HP_cnn_layer
+            print("CNN layer: ", self.cnn_layer)
+            self.cnn_list = nn.ModuleList()
+            self.cnn_drop_list = nn.ModuleList()
+            self.cnn_batchnorm_list = nn.ModuleList()
+            kernel = 3
+            pad_size = int((kernel-1)/2)
+            for idx in range(self.cnn_layer):
+                self.cnn_list.append(nn.Conv1d(data.HP_hidden_dim, data.HP_hidden_dim, kernel_size=kernel, padding=pad_size))
+                self.cnn_drop_list.append(nn.Dropout(data.HP_dropout))
+                self.cnn_batchnorm_list.append(nn.BatchNorm1d(data.HP_hidden_dim))
+
+
+        if self.gpu >= 0 and torch.cuda.is_available():
+            self.droplstm = self.droplstm.cuda(self.gpu)
+            if self.word_feature_extractor == "CNN":
+                self.word2cnn = self.word2cnn.cuda(self.gpu)
+                for idx in range(self.cnn_layer):
+                    self.cnn_list[idx] = self.cnn_list[idx].cuda(self.gpu)
+                    self.cnn_drop_list[idx] = self.cnn_drop_list[idx].cuda(self.gpu)
+                    self.cnn_batchnorm_list[idx] = self.cnn_batchnorm_list[idx].cuda(self.gpu)
+            else:
+                if self.use_elmo:
+                    self.lstm1 = self.lstm1.cuda(self.gpu)
+                    self.lstm2 = self.lstm2.cuda(self.gpu)
+                else:
+                    if self.batch_norm:
+                        for lstm, bn_s, bn_t in zip(self.lstm, self.bn_s, self.bn_t):
+                            lstm = lstm.cuda(self.gpu)
+                            bn_s = bn_s.cuda(self.gpu)
+                            bn_t = bn_t.cuda(self.gpu)
+                    else:
+                        self.lstm = self.lstm.cuda(self.gpu)
+
+
+    def forward(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs,
+                target=True):
+        """
+            input:
+                word_inputs: (batch_size, sent_len)
+                feature_inputs: [(batch_size, sent_len), ...] list of variables
+                word_seq_lengths: list of batch_size, (batch_size,1)
+                char_inputs: (batch_size*sent_len, word_length)
+                char_seq_lengths: list of whole batch_size for char, (batch_size*sent_len, 1)
+                char_seq_recover: variable which records the char order information, used to recover char order
+            output:
+                Variable(batch_size, sent_len, hidden_dim)
+        """
+        
+        word_represent = self.wordrep(word_inputs,feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover, elmo_char_inputs)
+        ## word_embs (batch_size, seq_len, embed_size)
+        if self.word_feature_extractor == "CNN":
+            batch_size = word_inputs.size(0)
+            word_in = torch.tanh(self.word2cnn(word_represent)).transpose(2,1).contiguous()
+            for idx in range(self.cnn_layer):
+                if idx == 0:
+                    cnn_feature = F.relu(self.cnn_list[idx](word_in))
+                else:
+                    cnn_feature = F.relu(self.cnn_list[idx](cnn_feature))
+                cnn_feature = self.cnn_drop_list[idx](cnn_feature)
+                if batch_size > 1:
+                    cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
+            feature_out = cnn_feature.transpose(2,1).contiguous()
+        else:
+            if self.batch_norm:
+                for idx, (lstm, bn_s, bn_t) in enumerate(zip(self.lstm, self.bn_s, self.bn_t)):
+                    lstm_in = word_represent if idx == 0 else lstm_in
+                    bn = bn_t if target else bn_s
+                    lstm_in = bn(lstm_in.transpose(2,1)).transpose(2,1)
+                    hidden = None
+                    lstm_out, hidden = lstm(lstm_in, hidden)
+                    lstm_in = lstm_out
+                feature_out = self.droplstm(lstm_out)
+
+            else:
+                packed_words = pack_padded_sequence(word_represent, word_seq_lengths.cpu().numpy(), True)
+                hidden = None
+                if self.use_elmo:
+                    lstm_out, hidden = self.lstm1(packed_words, None)
+                    lstm_out, hidden = self.lstm2(lstm_out, None)
+                else:
+                    lstm_out, hidden = self.lstm(packed_words, hidden)
+                lstm_out, _ = pad_packed_sequence(lstm_out)
+                ## lstm_out (seq_len, seq_len, hidden_size)
+                feature_out = self.droplstm(lstm_out.transpose(1,0))
+
+        return feature_out
+
+    def sentence_representation(self, word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover):
+        """
+            input:
+                word_inputs: (batch_size, sent_len)
+                feature_inputs: [(batch_size, ), ...] list of variables
+                word_seq_lengths: list of batch_size, (batch_size,1)
+                char_inputs: (batch_size*sent_len, word_length)
+                char_seq_lengths: list of whole batch_size for char, (batch_size*sent_len, 1)
+                char_seq_recover: variable which records the char order information, used to recover char order
+            output:
+                Variable(batch_size, sent_len, hidden_dim)
+        """
+
+        word_represent = self.wordrep(word_inputs, feature_inputs, word_seq_lengths, char_inputs, char_seq_lengths, char_seq_recover)
+        ## word_embs (batch_size, seq_len, embed_size)
+        batch_size = word_inputs.size(0)
+        if self.word_feature_extractor == "CNN":
+            word_in = torch.tanh(self.word2cnn(word_represent)).transpose(2,1).contiguous()
+            for idx in range(self.cnn_layer):
+                if idx == 0:
+                    cnn_feature = F.relu(self.cnn_list[idx](word_in))
+                else:
+                    cnn_feature = F.relu(self.cnn_list[idx](cnn_feature))
+                cnn_feature = self.cnn_drop_list[idx](cnn_feature)
+                if batch_size > 1:
+                    cnn_feature = self.cnn_batchnorm_list[idx](cnn_feature)
+            feature_out = F.max_pool1d(cnn_feature, cnn_feature.size(2)).view(batch_size, -1)
+        else:
+            packed_words = pack_padded_sequence(word_represent, word_seq_lengths.cpu().numpy(), True)
+            hidden = None
+            lstm_out, hidden = self.lstm(packed_words, hidden)
+            ## lstm_out (seq_len, seq_len, hidden_size)
+            ## feature_out (batch_size, hidden_size)
+            feature_out = hidden[0].transpose(1,0).contiguous().view(batch_size,-1)
+            
+        feature_list = [feature_out]
+        for idx in range(self.feature_num):
+            feature_list.append(self.feature_embeddings[idx](feature_inputs[idx]))
+        final_feature = torch.cat(feature_list, 1)
+        outputs = self.hidden2tag(self.droplstm(final_feature))
+        ## outputs: (batch_size, label_alphabet_size)
+        return outputs

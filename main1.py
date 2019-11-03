@@ -15,9 +15,10 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from utils.metric import get_ner_fmeasure
-from model.seqlabel1 import SeqLabel1
+from model.seqlabel2 import SeqLabel2
 from model.sentclassifier import SentClassifier
 from utils.data import Data
+import copy
 
 try:
     import cPickle as pickle
@@ -35,10 +36,10 @@ def data_initialization(data):
     data.initial_feature_alphabets()
     data.build_alphabet(data.s_lm, build_label_alphabet=False)
     data.build_alphabet(data.t_lm, build_label_alphabet=False)
-    if data.mode == 'ner':
+    if data.mode == 'ner' or data.mode == 'lm_ner':
         data.build_alphabet(data.s_ner_train, build_label_alphabet=False)
         data.build_alphabet(data.s_ner_eval, build_label_alphabet=False)
-    elif data.mode == 'finetune':
+    elif data.mode == 'finetune' or data.mode == 'lm_finetune':
         data.build_alphabet(data.s_ner_train, target=False)
         data.build_alphabet(data.s_ner_eval, target=False)
     else:
@@ -47,6 +48,7 @@ def data_initialization(data):
     data.build_alphabet(data.dev_dir)
     data.build_alphabet(data.test_dir)
     data.fix_alphabet()
+
 
 
 def predict_check(pred_variable, gold_variable, mask_variable, sentence_classification=False):
@@ -60,9 +62,14 @@ def predict_check(pred_variable, gold_variable, mask_variable, sentence_classifi
     gold = gold_variable.cpu().data.numpy()
     mask = mask_variable.cpu().data.numpy()
     overlaped = (pred == gold)
-
-    right_token = np.sum(overlaped * mask)
-    total_token = mask.sum()
+    if sentence_classification:
+        # print(overlaped)
+        # print(overlaped*pred)
+        right_token = np.sum(overlaped)
+        total_token = overlaped.shape[0] ## =batch_size
+    else:
+        right_token = np.sum(overlaped * mask)
+        total_token = mask.sum()
     # print("right: %s, total: %s"%(right_token, total_token))
     return right_token, total_token
 
@@ -78,20 +85,25 @@ def recover_label(pred_variable, gold_variable, mask_variable, label_alphabet, w
     gold_variable = gold_variable[word_recover]
     mask_variable = mask_variable[word_recover]
     batch_size = gold_variable.size(0)
-
-    seq_len = gold_variable.size(1)
-    mask = mask_variable.cpu().data.numpy()
-    pred_tag = pred_variable.cpu().data.numpy()
-    gold_tag = gold_variable.cpu().data.numpy()
-    batch_size = mask.shape[0]
-    pred_label = []
-    gold_label = []
-    for idx in range(batch_size):
-        pred = [label_alphabet.get_instance(pred_tag[idx][idy]) for idy in range(seq_len) if mask[idx][idy] != 0]
-        gold = [label_alphabet.get_instance(gold_tag[idx][idy]) for idy in range(seq_len) if mask[idx][idy] != 0]
-        assert(len(pred)==len(gold))
-        pred_label.append(pred)
-        gold_label.append(gold)
+    if sentence_classification:
+        pred_tag = pred_variable.cpu().data.numpy().tolist()
+        gold_tag = gold_variable.cpu().data.numpy().tolist()
+        pred_label = [label_alphabet.get_instance(pred) for pred in pred_tag]
+        gold_label = [label_alphabet.get_instance(gold) for gold in gold_tag]
+    else:
+        seq_len = gold_variable.size(1)
+        mask = mask_variable.cpu().data.numpy()
+        pred_tag = pred_variable.cpu().data.numpy()
+        gold_tag = gold_variable.cpu().data.numpy()
+        batch_size = mask.shape[0]
+        pred_label = []
+        gold_label = []
+        for idx in range(batch_size):
+            pred = [label_alphabet.get_instance(pred_tag[idx][idy]) for idy in range(seq_len) if mask[idx][idy] != 0]
+            gold = [label_alphabet.get_instance(gold_tag[idx][idy]) for idy in range(seq_len) if mask[idx][idy] != 0]
+            assert(len(pred)==len(gold))
+            pred_label.append(pred)
+            gold_label.append(gold)
     return pred_label, gold_label
 
 
@@ -184,7 +196,8 @@ def evaluate(data, model, name, label_alphabet, nbest=None):
             ## select the best sequence to evalurate
             tag_seq = nbest_tag_seq[:,:,0]
         else:
-            tag_seq = model(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, mask, batch_elmo_char)
+            target = False if name == 's_train' or name == 's_dev' else True
+            tag_seq = model(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, mask, batch_elmo_char, target=target)
         # print("tag:",tag_seq)
         pred_label, gold_label = recover_label(tag_seq, batch_label, mask, label_alphabet, batch_wordrecover, data.sentence_classification)
         pred_results += pred_label
@@ -197,9 +210,13 @@ def evaluate(data, model, name, label_alphabet, nbest=None):
     return speed, acc, p, r, f, pred_results, pred_scores
 
 
-def batchify_with_label(input_batch_list, input_text_batch_list, gpu, if_train=True, sentence_classification=False):
 
-    return batchify_sequence_labeling_with_label(input_batch_list, input_text_batch_list, gpu, if_train)
+def batchify_with_label(input_batch_list, input_text_batch_list, gpu, if_train=True, sentence_classification=False):
+    if sentence_classification:
+        # return batchify_sentence_classification_with_label(input_batch_list, gpu, if_train)
+        raise RuntimeError("not support")
+    else:
+        return batchify_sequence_labeling_with_label(input_batch_list, input_text_batch_list, gpu, if_train)
 
 from elmo.elmo import batch_to_ids
 
@@ -228,7 +245,6 @@ def batchify_sequence_labeling_with_label(input_batch_list, input_text_batch_lis
     feature_num = len(features[0][0])
     chars = [sent[2] for sent in input_batch_list]
     labels = [sent[3] for sent in input_batch_list]
-    words_backward = [sent[4] for sent in input_batch_list]
 
     words_text = [sent[4] for sent in input_text_batch_list]
     elmo_char_seq_tensor = batch_to_ids(words_text)
@@ -236,23 +252,20 @@ def batchify_sequence_labeling_with_label(input_batch_list, input_text_batch_lis
     word_seq_lengths = torch.LongTensor(list(map(len, words)))
     max_seq_len = word_seq_lengths.max().item()
     word_seq_tensor = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).long()
-    word_backward_seq_tensor = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).long()
     label_seq_tensor = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).long()
     feature_seq_tensors = []
     for idx in range(feature_num):
         feature_seq_tensors.append(torch.zeros((batch_size, max_seq_len),requires_grad =  if_train).long())
     mask = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).byte()
-    for idx, (seq, seq_backward, label, seqlen) in enumerate(zip(words, words_backward, labels, word_seq_lengths)):
+    for idx, (seq, label, seqlen) in enumerate(zip(words, labels, word_seq_lengths)):
         seqlen = seqlen.item()
         word_seq_tensor[idx, :seqlen] = torch.LongTensor(seq)
-        word_backward_seq_tensor[idx, :seqlen] = torch.LongTensor(seq_backward)
         label_seq_tensor[idx, :seqlen] = torch.LongTensor(label)
         mask[idx, :seqlen] = torch.Tensor([1]*seqlen)
         for idy in range(feature_num):
             feature_seq_tensors[idy][idx,:seqlen] = torch.LongTensor(features[idx][:,idy])
     word_seq_lengths, word_perm_idx = word_seq_lengths.sort(0, descending=True)
     word_seq_tensor = word_seq_tensor[word_perm_idx]
-    word_backward_seq_tensor = word_backward_seq_tensor[word_perm_idx]
     for idx in range(feature_num):
         feature_seq_tensors[idx] = feature_seq_tensors[idx][word_perm_idx]
 
@@ -279,7 +292,6 @@ def batchify_sequence_labeling_with_label(input_batch_list, input_text_batch_lis
     _, word_seq_recover = word_perm_idx.sort(0, descending=False)
     if gpu >= 0 and torch.cuda.is_available():
         word_seq_tensor = word_seq_tensor.cuda(gpu)
-        word_backward_seq_tensor = word_backward_seq_tensor.cuda(gpu)
         for idx in range(feature_num):
             feature_seq_tensors[idx] = feature_seq_tensors[idx].cuda(gpu)
         word_seq_lengths = word_seq_lengths.cuda(gpu)
@@ -289,10 +301,89 @@ def batchify_sequence_labeling_with_label(input_batch_list, input_text_batch_lis
         char_seq_recover = char_seq_recover.cuda(gpu)
         mask = mask.cuda(gpu)
         elmo_char_seq_tensor = elmo_char_seq_tensor.cuda(gpu)
-    return word_seq_tensor, word_backward_seq_tensor, feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, label_seq_tensor, mask, elmo_char_seq_tensor
+    return word_seq_tensor,feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, label_seq_tensor, mask, elmo_char_seq_tensor
 
-from model.lm import LanguageModel
-import copy
+
+def batchify_sentence_classification_with_label(input_batch_list, gpu, if_train=True):
+    """
+        input: list of words, chars and labels, various length. [[words, features, chars, labels],[words, features, chars,labels],...]
+            words: word ids for one sentence. (batch_size, sent_len)
+            features: features ids for one sentence. (batch_size, feature_num), each sentence has one set of feature
+            chars: char ids for on sentences, various length. (batch_size, sent_len, each_word_length)
+            labels: label ids for one sentence. (batch_size,), each sentence has one set of feature
+
+        output:
+            zero padding for word and char, with their batch length
+            word_seq_tensor: (batch_size, max_sent_len) Variable
+            feature_seq_tensors: [(batch_size,), ... ] list of Variable
+            word_seq_lengths: (batch_size,1) Tensor
+            char_seq_tensor: (batch_size*max_sent_len, max_word_len) Variable
+            char_seq_lengths: (batch_size*max_sent_len,1) Tensor
+            char_seq_recover: (batch_size*max_sent_len,1)  recover char sequence order
+            label_seq_tensor: (batch_size, )
+            mask: (batch_size, max_sent_len)
+    """
+
+    batch_size = len(input_batch_list)
+    words = [sent[0] for sent in input_batch_list]
+    features = [np.asarray(sent[1]) for sent in input_batch_list]    
+    feature_num = len(features[0])
+    chars = [sent[2] for sent in input_batch_list]
+    labels = [sent[3] for sent in input_batch_list]
+    word_seq_lengths = torch.LongTensor(list(map(len, words)))
+    max_seq_len = word_seq_lengths.max().item()
+    word_seq_tensor = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).long()
+    label_seq_tensor = torch.zeros((batch_size, ), requires_grad =  if_train).long()
+    feature_seq_tensors = []
+    for idx in range(feature_num):
+        feature_seq_tensors.append(torch.zeros((batch_size, max_seq_len),requires_grad =  if_train).long())
+    mask = torch.zeros((batch_size, max_seq_len), requires_grad =  if_train).byte()
+    label_seq_tensor = torch.LongTensor(labels)
+    # exit(0)
+    for idx, (seq,  seqlen) in enumerate(zip(words,  word_seq_lengths)):
+        seqlen = seqlen.item()
+        word_seq_tensor[idx, :seqlen] = torch.LongTensor(seq)
+        mask[idx, :seqlen] = torch.Tensor([1]*seqlen)
+        for idy in range(feature_num):
+            feature_seq_tensors[idy][idx,:seqlen] = torch.LongTensor(features[idx][:,idy])
+    word_seq_lengths, word_perm_idx = word_seq_lengths.sort(0, descending=True)
+    word_seq_tensor = word_seq_tensor[word_perm_idx]
+    for idx in range(feature_num):
+        feature_seq_tensors[idx] = feature_seq_tensors[idx][word_perm_idx]
+    label_seq_tensor = label_seq_tensor[word_perm_idx]
+    mask = mask[word_perm_idx]
+    ### deal with char
+    # pad_chars (batch_size, max_seq_len)
+    pad_chars = [chars[idx] + [[0]] * (max_seq_len-len(chars[idx])) for idx in range(len(chars))]
+    length_list = [list(map(len, pad_char)) for pad_char in pad_chars]
+    max_word_len = max(map(max, length_list))
+    char_seq_tensor = torch.zeros((batch_size, max_seq_len, max_word_len), requires_grad =  if_train).long()
+    char_seq_lengths = torch.LongTensor(length_list)
+    for idx, (seq, seqlen) in enumerate(zip(pad_chars, char_seq_lengths)):
+        for idy, (word, wordlen) in enumerate(zip(seq, seqlen)):
+            # print len(word), wordlen
+            char_seq_tensor[idx, idy, :wordlen] = torch.LongTensor(word)
+
+    char_seq_tensor = char_seq_tensor[word_perm_idx].view(batch_size*max_seq_len,-1)
+    char_seq_lengths = char_seq_lengths[word_perm_idx].view(batch_size*max_seq_len,)
+    char_seq_lengths, char_perm_idx = char_seq_lengths.sort(0, descending=True)
+    char_seq_tensor = char_seq_tensor[char_perm_idx]
+    _, char_seq_recover = char_perm_idx.sort(0, descending=False)
+    _, word_seq_recover = word_perm_idx.sort(0, descending=False)
+    if gpu:
+        word_seq_tensor = word_seq_tensor.cuda()
+        for idx in range(feature_num):
+            feature_seq_tensors[idx] = feature_seq_tensors[idx].cuda()
+        word_seq_lengths = word_seq_lengths.cuda()
+        word_seq_recover = word_seq_recover.cuda()
+        label_seq_tensor = label_seq_tensor.cuda()
+        char_seq_tensor = char_seq_tensor.cuda()
+        char_seq_recover = char_seq_recover.cuda()
+        mask = mask.cuda()
+    return word_seq_tensor,feature_seq_tensors, word_seq_lengths, word_seq_recover, char_seq_tensor, char_seq_lengths, char_seq_recover, label_seq_tensor, mask
+
+
+
 
 def train(data):
     print("Training model...")
@@ -301,12 +392,12 @@ def train(data):
     data.save(save_data_name)
 
     if data.mode == 'ner':
-        model = SeqLabel1(data)
+        model = SeqLabel2(data)
     elif data.mode == 'finetune':
-        s_model = SeqLabel1(data, target=False)
-        model = SeqLabel1(data)
+        s_model = SeqLabel2(data, target=False)
+        model = SeqLabel2(data)
     elif data.mode == 'lm_ner':
-        model = SeqLabel1(data)
+        model = SeqLabel2(data)
         lm_state_dict = torch.load(data.lm_model_dir + ".lm.model")
 
         # delete hidden2tag layers
@@ -316,8 +407,23 @@ def train(data):
         del lm_state_dict['hidden2tag_backward.bias']
 
         model.load_state_dict(lm_state_dict, strict=False)
+    elif data.mode == 'lm_finetune':
+        s_model = SeqLabel2(data, target=False)
+        model = SeqLabel2(data)
+        lm_state_dict = torch.load(data.lm_model_dir + ".lm.model")
 
-    if data.mode == 'finetune':
+        # delete hidden2tag layers
+        del lm_state_dict['hidden2tag_forward.weight']
+        del lm_state_dict['hidden2tag_forward.bias']
+        del lm_state_dict['hidden2tag_backward.weight']
+        del lm_state_dict['hidden2tag_backward.bias']
+
+        s_model.load_state_dict(lm_state_dict, strict=False)
+        model.load_state_dict(lm_state_dict, strict=False)
+
+
+
+    if data.mode == 'finetune' or data.mode == 'lm_finetune':
         if data.optimizer.lower() == "sgd":
             s_optimizer = optim.SGD(s_model.parameters(), lr=data.HP_lr, momentum=data.HP_momentum, weight_decay=data.HP_l2)
         elif data.optimizer.lower() == "adam":
@@ -347,10 +453,10 @@ def train(data):
             p.requires_grad = False
     if data.tune_wordemb == False:
         freeze_net(model)
-        if data.mode == 'finetune':
+        if data.mode == 'finetune' or data.mode == 'lm_finetune':
             freeze_net(s_model)
 
-    if data.mode == 'finetune':
+    if data.mode == 'finetune' or data.mode == 'lm_finetune':
         print("###source domain training begins###")
         best_dev = -10
         bad_counter = 0
@@ -380,7 +486,7 @@ def train(data):
                     instance, instance_text, data.HP_gpu, True, data.sentence_classification)
                 loss, tag_seq = s_model.calculate_loss(batch_word, batch_features, batch_wordlen, batch_char,
                                                      batch_charlen, batch_charrecover, batch_label, mask,
-                                                     batch_elmo_char)
+                                                     batch_elmo_char, target=False)
                 loss.backward()
                 s_optimizer.step()
                 s_model.zero_grad()
@@ -455,9 +561,9 @@ def train(data):
             instance_text = data.train_texts[start:end]
             if not instance:
                 continue
-            batch_word, batch_word_backward, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label, mask, batch_elmo_char = batchify_with_label(instance, instance_text, data.HP_gpu, True, data.sentence_classification)
+            batch_word, batch_features, batch_wordlen, batch_wordrecover, batch_char, batch_charlen, batch_charrecover, batch_label, mask, batch_elmo_char = batchify_with_label(instance, instance_text, data.HP_gpu, True, data.sentence_classification)
             instance_count += 1
-            loss, tag_seq = model.calculate_loss(batch_word, batch_word_backward, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, batch_label, mask, batch_elmo_char)
+            loss, tag_seq = model.calculate_loss(batch_word, batch_features, batch_wordlen, batch_char, batch_charlen, batch_charrecover, batch_label, mask, batch_elmo_char, target=True)
             right, whole = predict_check(tag_seq, batch_label, mask, data.sentence_classification)
             right_token += right
             whole_token += whole
@@ -542,7 +648,6 @@ def train(data):
 
 
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Tuning with NCRF++')
     # parser.add_argument('--status', choices=['train', 'decode'], help='update algorithm', default='train')
@@ -586,7 +691,7 @@ if __name__ == '__main__':
 
     if status == 'train':
         data_initialization(data)
-        if data.mode == 'finetune':
+        if data.mode == 'finetune' or data.mode == 'lm_finetune':
             data.generate_instance('s_train')
             data.generate_instance('s_dev')
         data.generate_instance('train')
@@ -596,4 +701,3 @@ if __name__ == '__main__':
         train(data)
     else:
         print("Invalid argument! Please use valid arguments! (train/test/decode)")
-
